@@ -53,4 +53,4 @@ Tambem deixei o projeto preparado para gerar um APK Android que abre a versao pu
 - Pasta do projeto: [android](/C:/Users/User/Desktop/Base3/android)
 - Build automatico: [.github/workflows/build-android-apk.yml](/C:/Users/User/Desktop/Base3/.github/workflows/build-android-apk.yml)
 
-O APK sai como artefato do workflow `Build Android APK`. Ele funciona em celulares e tablets porque carrega a interface web responsiva do sistema.
+O APK sai como artefato do workflow `Build Android APK`. O pipeline tenta gerar uma APK release assinada e, se a assinatura nao estiver disponivel ou falhar, ele cai automaticamente para uma APK debug instalavel em celulares e tablets porque carrega a interface web responsiva do sistema.

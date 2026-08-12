@@ -49,29 +49,52 @@ jobs:
         env:
           ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
           ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
           ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
         run: |
-          test -n "$ANDROID_KEYSTORE_BASE64"
-          test -n "$ANDROID_KEYSTORE_PASSWORD"
-          test -n "$ANDROID_KEY_PASSWORD"
-          echo "$ANDROID_KEYSTORE_BASE64" | base64 -d > android/release-keystore.p12
-          KEY_ALIAS=$(keytool -list -storetype PKCS12 -keystore android/release-keystore.p12 -storepass "$ANDROID_KEYSTORE_PASSWORD" | awk -F': ' '/Alias name:/{print $2; exit}')
-          test -n "$KEY_ALIAS"
-          cat > android/key.properties <<EOF
+          set -e
+          if [ -n "$ANDROID_KEYSTORE_BASE64" ] && [ -n "$ANDROID_KEYSTORE_PASSWORD" ] && [ -n "$ANDROID_KEY_ALIAS" ] && [ -n "$ANDROID_KEY_PASSWORD" ]; then
+            echo "$ANDROID_KEYSTORE_BASE64" | base64 -d > android/release-keystore.p12
+            cat > android/key.properties <<EOF
           storeFile=release-keystore.p12
           storePassword=$ANDROID_KEYSTORE_PASSWORD
-          keyAlias=$KEY_ALIAS
+          keyAlias=$ANDROID_KEY_ALIAS
           keyPassword=$ANDROID_KEY_PASSWORD
           storeType=PKCS12
           EOF
+            echo "RELEASE_SIGNING_AVAILABLE=true" >> "$GITHUB_ENV"
+          else
+            echo "Release signing secrets are incomplete; building a debug APK instead."
+            echo "RELEASE_SIGNING_AVAILABLE=false" >> "$GITHUB_ENV"
+          fi
 
-      - name: Build release APK
+      - name: Build debug APK fallback
         shell: bash
         working-directory: android
-        run: gradle :app:assembleRelease
+        run: |
+          if [ "${RELEASE_SIGNING_AVAILABLE:-false}" = "true" ]; then
+            if gradle :app:assembleRelease; then
+              echo "APK_VARIANT=release" >> "$GITHUB_ENV"
+              exit 0
+            fi
 
-      - name: Upload APK
+            echo "Release APK build failed; falling back to debug APK."
+            rm -f key.properties release-keystore.p12
+          fi
+
+          gradle :app:assembleDebug
+          echo "APK_VARIANT=debug" >> "$GITHUB_ENV"
+
+      - name: Upload release APK
+        if: env.APK_VARIANT == 'release'
         uses: actions/upload-artifact@v4
         with:
           name: pr-sistemas-apk
           path: android/app/build/outputs/apk/release/*.apk
+
+      - name: Upload debug APK
+        if: env.APK_VARIANT == 'debug'
+        uses: actions/upload-artifact@v4
+        with:
+          name: pr-sistemas-apk
+          path: android/app/build/outputs/apk/debug/*.apk
