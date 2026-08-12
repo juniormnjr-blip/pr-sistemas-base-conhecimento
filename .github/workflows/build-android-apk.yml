@@ -18,7 +18,7 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Set up JDK 17
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: 17
@@ -36,7 +36,8 @@ jobs:
 
       - name: Accept Android licenses
         shell: bash
-        run: yes | sdkmanager --licenses
+        run: |
+          yes | sdkmanager --licenses >/dev/null 2>&1 || true
 
       - name: Install Android packages
         shell: bash
