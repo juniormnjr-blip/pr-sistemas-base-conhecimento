@@ -2,6 +2,7 @@ require('dotenv').config();
 
 const crypto = require('crypto');
 const path = require('path');
+const { URL } = require('url');
 const express = require('express');
 const cookieParser = require('cookie-parser');
 const bcrypt = require('bcryptjs');
@@ -12,6 +13,7 @@ const app = express();
 const port = Number(process.env.PORT) || 3000;
 const jwtSecret = process.env.JWT_SECRET || 'change-me-in-production';
 const databaseUrl = process.env.DATABASE_URL;
+const fallbackDatabaseUrl = buildFallbackDatabaseUrl(databaseUrl);
 
 if (!databaseUrl) {
   console.warn('AVISO: DATABASE_URL não definido. O servidor precisa de um PostgreSQL na nuvem ou local.');
@@ -37,6 +39,28 @@ function requireDatabase() {
   if (!pool) {
     throw new Error('DATABASE_URL não configurado.');
   }
+}
+
+function buildFallbackDatabaseUrl(connectionString) {
+  if (!connectionString) return null;
+
+  try {
+    const parsed = new URL(connectionString);
+    const host = parsed.hostname || '';
+
+    if (host.includes('.render.com')) {
+      return null;
+    }
+
+    if (host.startsWith('dpg-')) {
+      parsed.hostname = `${host}.virginia-postgres.render.com`;
+      return parsed.toString();
+    }
+  } catch (error) {
+    return null;
+  }
+
+  return null;
 }
 
 function toSafeUser(row) {
@@ -74,7 +98,24 @@ function toSafePost(row) {
 
 async function query(text, params = []) {
   requireDatabase();
-  return pool.query(text, params);
+
+  try {
+    return await pool.query(text, params);
+  } catch (error) {
+    const isDnsIssue = error?.code === 'ENOTFOUND' || /getaddrinfo ENOTFOUND/i.test(String(error?.message || ''));
+    if (fallbackDatabaseUrl && isDnsIssue) {
+      const fallbackPool = new Pool({
+        connectionString: fallbackDatabaseUrl,
+        ssl: { rejectUnauthorized: false }
+      });
+
+      const result = await fallbackPool.query(text, params);
+      await fallbackPool.end().catch(() => {});
+      return result;
+    }
+
+    throw error;
+  }
 }
 
 async function ensureSchema() {
