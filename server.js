@@ -12,7 +12,7 @@ const { Pool } = require('pg');
 const app = express();
 const port = Number(process.env.PORT) || 3000;
 const jwtSecret = process.env.JWT_SECRET || 'change-me-in-production';
-const databaseUrl = process.env.DATABASE_URL;
+const databaseUrl = normalizeDatabaseUrl(process.env.DATABASE_URL);
 const fallbackDatabaseUrl = buildFallbackDatabaseUrl(databaseUrl);
 
 if (!databaseUrl) {
@@ -39,6 +39,24 @@ function requireDatabase() {
   if (!pool) {
     throw new Error('DATABASE_URL não configurado.');
   }
+}
+
+function normalizeDatabaseUrl(connectionString) {
+  if (!connectionString) return null;
+
+  const trimmed = String(connectionString).trim().replace(/^["']|["']$/g, '');
+  const protocolMatch = trimmed.match(/postgres(?:ql)?:\/\//i);
+  if (!protocolMatch) return trimmed;
+
+  const protocolIndex = protocolMatch.index || 0;
+  const rest = trimmed.slice(protocolIndex);
+  const nextProtocolIndex = rest.slice(1).search(/postgres(?:ql)?:\/\//i);
+
+  if (nextProtocolIndex >= 0) {
+    return rest.slice(0, nextProtocolIndex + 1).replace(/[\s"'`]+$/g, '');
+  }
+
+  return rest;
 }
 
 function buildFallbackDatabaseUrl(connectionString) {
