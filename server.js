@@ -1,0 +1,569 @@
+require('dotenv').config();
+
+const crypto = require('crypto');
+const path = require('path');
+const express = require('express');
+const cookieParser = require('cookie-parser');
+const bcrypt = require('bcryptjs');
+const jwt = require('jsonwebtoken');
+const { Pool } = require('pg');
+
+const app = express();
+const port = Number(process.env.PORT) || 3000;
+const jwtSecret = process.env.JWT_SECRET || 'change-me-in-production';
+const databaseUrl = process.env.DATABASE_URL;
+
+if (!databaseUrl) {
+  console.warn('AVISO: DATABASE_URL não definido. O servidor precisa de um PostgreSQL na nuvem ou local.');
+}
+
+const pool = databaseUrl
+  ? new Pool({
+      connectionString: databaseUrl,
+      ssl: (() => {
+        if (process.env.PGSSL === 'false') return false;
+        if (process.env.PGSSL === 'true') return { rejectUnauthorized: false };
+        if (/localhost|127\.0\.0\.1/i.test(databaseUrl)) return false;
+        return { rejectUnauthorized: false };
+      })()
+    })
+  : null;
+
+app.use(express.json({ limit: '50mb' }));
+app.use(cookieParser());
+app.use(express.static(__dirname));
+
+function requireDatabase() {
+  if (!pool) {
+    throw new Error('DATABASE_URL não configurado.');
+  }
+}
+
+function toSafeUser(row) {
+  if (!row) return null;
+
+  return {
+    id: row.id,
+    user: row.username,
+    role: row.role
+  };
+}
+
+function toSafeConfig(row) {
+  return {
+    modules: Array.isArray(row?.modules) && row.modules.length > 0 ? row.modules : ['Geral'],
+    categories: Array.isArray(row?.categories) && row.categories.length > 0 ? row.categories : ['Erro']
+  };
+}
+
+function toSafePost(row) {
+  return {
+    id: row.id,
+    title: row.title,
+    module: row.module,
+    category: row.category,
+    problem: row.problem,
+    solution: row.solution,
+    date: row.date_text,
+    updatedAt: row.updated_at_text,
+    author: row.author,
+    problemImages: Array.isArray(row.problem_images) ? row.problem_images : [],
+    solutionImages: Array.isArray(row.solution_images) ? row.solution_images : []
+  };
+}
+
+async function query(text, params = []) {
+  requireDatabase();
+  return pool.query(text, params);
+}
+
+async function ensureSchema() {
+  requireDatabase();
+
+  await query(`
+    CREATE TABLE IF NOT EXISTS users (
+      id SERIAL PRIMARY KEY,
+      username TEXT NOT NULL UNIQUE,
+      password_hash TEXT NOT NULL,
+      role TEXT NOT NULL CHECK (role IN ('admin', 'editor', 'leitor')),
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+  `);
+
+  await query(`
+    CREATE TABLE IF NOT EXISTS settings (
+      id INTEGER PRIMARY KEY CHECK (id = 1),
+      modules JSONB NOT NULL DEFAULT '["Geral"]'::jsonb,
+      categories JSONB NOT NULL DEFAULT '["Erro"]'::jsonb,
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+  `);
+
+  await query(`
+    CREATE TABLE IF NOT EXISTS posts (
+      id TEXT PRIMARY KEY,
+      title TEXT NOT NULL,
+      module TEXT NOT NULL,
+      category TEXT NOT NULL,
+      problem TEXT NOT NULL,
+      solution TEXT NOT NULL,
+      author TEXT NOT NULL,
+      date_text TEXT NOT NULL,
+      updated_at_text TEXT NOT NULL,
+      problem_images JSONB NOT NULL DEFAULT '[]'::jsonb,
+      solution_images JSONB NOT NULL DEFAULT '[]'::jsonb,
+      created_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+      updated_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+  `);
+
+  await query(`
+    INSERT INTO settings (id, modules, categories)
+    VALUES (1, '["Geral"]'::jsonb, '["Erro"]'::jsonb)
+    ON CONFLICT (id) DO NOTHING;
+  `);
+
+  const adminCount = await query(`SELECT COUNT(*)::int AS total FROM users;`);
+  if (adminCount.rows[0].total === 0) {
+    const passwordHash = await bcrypt.hash('admin', 10);
+    await query(
+      `INSERT INTO users (username, password_hash, role) VALUES ($1, $2, $3);`,
+      ['admin', passwordHash, 'admin']
+    );
+  }
+}
+
+async function getCurrentUser(req) {
+  const token = req.cookies.prs_token;
+  if (!token) return null;
+
+  try {
+    const payload = jwt.verify(token, jwtSecret);
+    const result = await query(`SELECT id, username, role FROM users WHERE id = $1`, [payload.userId]);
+    return toSafeUser(result.rows[0]);
+  } catch (error) {
+    return null;
+  }
+}
+
+async function getConfigs() {
+  const result = await query(`SELECT modules, categories FROM settings WHERE id = 1`);
+  return toSafeConfig(result.rows[0]);
+}
+
+async function setConfigs(updater) {
+  const current = await getConfigs();
+  const next = updater(current);
+
+  await query(
+    `
+      UPDATE settings
+      SET modules = $1::jsonb,
+          categories = $2::jsonb,
+          updated_at = NOW()
+      WHERE id = 1
+    `,
+    [JSON.stringify(next.modules), JSON.stringify(next.categories)]
+  );
+
+  return next;
+}
+
+async function getPosts() {
+  const result = await query(`SELECT * FROM posts ORDER BY created_at DESC`);
+  return result.rows.map(toSafePost);
+}
+
+async function getUsers() {
+  const result = await query(`SELECT id, username, role FROM users ORDER BY created_at ASC`);
+  return result.rows.map(toSafeUser);
+}
+
+app.get('/api/bootstrap', async (req, res) => {
+  try {
+    const user = await getCurrentUser(req);
+    const [posts, configs] = await Promise.all([getPosts(), getConfigs()]);
+    const users = user?.role === 'admin' ? await getUsers() : [];
+
+    res.json({ user, posts, configs, users });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: 'Não foi possível carregar os dados.' });
+  }
+});
+
+app.post('/api/login', async (req, res) => {
+  try {
+    const username = String(req.body.user || '').trim();
+    const password = String(req.body.pass || '');
+
+    if (!username || !password) {
+      return res.status(400).json({ error: 'Usuário e senha são obrigatórios.' });
+    }
+
+    const result = await query(
+      `SELECT id, username, password_hash, role FROM users WHERE LOWER(username) = LOWER($1) LIMIT 1`,
+      [username]
+    );
+
+    const user = result.rows[0];
+    if (!user) {
+      return res.status(401).json({ error: 'Acesso negado.' });
+    }
+
+    const valid = await bcrypt.compare(password, user.password_hash);
+    if (!valid) {
+      return res.status(401).json({ error: 'Acesso negado.' });
+    }
+
+    const token = jwt.sign({ userId: user.id }, jwtSecret, { expiresIn: '7d' });
+    res.cookie('prs_token', token, {
+      httpOnly: true,
+      sameSite: 'lax',
+      secure: process.env.NODE_ENV === 'production',
+      maxAge: 7 * 24 * 60 * 60 * 1000
+    });
+
+    res.json({ user: toSafeUser(user) });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: 'Falha ao autenticar.' });
+  }
+});
+
+app.post('/api/logout', (req, res) => {
+  res.clearCookie('prs_token', {
+    httpOnly: true,
+    sameSite: 'lax',
+    secure: process.env.NODE_ENV === 'production'
+  });
+
+  res.json({ ok: true });
+});
+
+app.get('/api/me', async (req, res) => {
+  try {
+    const user = await getCurrentUser(req);
+    res.json({ user });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: 'Falha ao obter sessão.' });
+  }
+});
+
+app.post('/api/posts', async (req, res) => {
+  try {
+    const user = await getCurrentUser(req);
+    if (!user || !['admin', 'editor'].includes(user.role)) {
+      return res.status(403).json({ error: 'Sem permissão.' });
+    }
+
+    const title = String(req.body.title || '').trim();
+    const moduleName = String(req.body.module || '').trim();
+    const category = String(req.body.category || '').trim();
+    const problem = String(req.body.problem || '').trim();
+    const solution = String(req.body.solution || '').trim();
+    const problemImages = Array.isArray(req.body.problemImages) ? req.body.problemImages : [];
+    const solutionImages = Array.isArray(req.body.solutionImages) ? req.body.solutionImages : [];
+
+    if (!title || !moduleName || !category || !problem || !solution) {
+      return res.status(400).json({ error: 'Preencha todos os campos obrigatórios.' });
+    }
+
+    const id = `post_${crypto.randomUUID()}`;
+    const dateText = new Date().toLocaleDateString('pt-BR');
+    const updatedText = dateText;
+
+    const result = await query(
+      `
+        INSERT INTO posts (
+          id, title, module, category, problem, solution, author,
+          date_text, updated_at_text, problem_images, solution_images, created_by, updated_by
+        )
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::jsonb, $11::jsonb, $12, $13)
+        RETURNING *
+      `,
+      [
+        id,
+        title,
+        moduleName,
+        category,
+        problem,
+        solution,
+        user.user,
+        dateText,
+        updatedText,
+        JSON.stringify(problemImages),
+        JSON.stringify(solutionImages),
+        user.id,
+        user.id
+      ]
+    );
+
+    res.status(201).json({ post: toSafePost(result.rows[0]) });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: 'Falha ao salvar artigo.' });
+  }
+});
+
+app.put('/api/posts/:id', async (req, res) => {
+  try {
+    const user = await getCurrentUser(req);
+    if (!user || !['admin', 'editor'].includes(user.role)) {
+      return res.status(403).json({ error: 'Sem permissão.' });
+    }
+
+    const postId = String(req.params.id);
+    const currentResult = await query(`SELECT * FROM posts WHERE id = $1`, [postId]);
+    const current = currentResult.rows[0];
+
+    if (!current) {
+      return res.status(404).json({ error: 'Artigo não encontrado.' });
+    }
+
+    const title = String(req.body.title || '').trim();
+    const moduleName = String(req.body.module || '').trim();
+    const category = String(req.body.category || '').trim();
+    const problem = String(req.body.problem || '').trim();
+    const solution = String(req.body.solution || '').trim();
+    const problemImages = Array.isArray(req.body.problemImages) ? req.body.problemImages : current.problem_images || [];
+    const solutionImages = Array.isArray(req.body.solutionImages) ? req.body.solutionImages : current.solution_images || [];
+
+    if (!title || !moduleName || !category || !problem || !solution) {
+      return res.status(400).json({ error: 'Preencha todos os campos obrigatórios.' });
+    }
+
+    const updatedText = new Date().toLocaleDateString('pt-BR');
+
+    const result = await query(
+      `
+        UPDATE posts
+        SET title = $2,
+            module = $3,
+            category = $4,
+            problem = $5,
+            solution = $6,
+            updated_at_text = $7,
+            problem_images = $8::jsonb,
+            solution_images = $9::jsonb,
+            updated_by = $10,
+            updated_at = NOW()
+        WHERE id = $1
+        RETURNING *
+      `,
+      [
+        postId,
+        title,
+        moduleName,
+        category,
+        problem,
+        solution,
+        updatedText,
+        JSON.stringify(problemImages),
+        JSON.stringify(solutionImages),
+        user.id
+      ]
+    );
+
+    res.json({ post: toSafePost(result.rows[0]) });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: 'Falha ao atualizar artigo.' });
+  }
+});
+
+app.delete('/api/posts/:id', async (req, res) => {
+  try {
+    const user = await getCurrentUser(req);
+    if (!user || !['admin', 'editor'].includes(user.role)) {
+      return res.status(403).json({ error: 'Sem permissão.' });
+    }
+
+    await query(`DELETE FROM posts WHERE id = $1`, [String(req.params.id)]);
+    res.json({ ok: true });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: 'Falha ao excluir artigo.' });
+  }
+});
+
+app.get('/api/users', async (req, res) => {
+  try {
+    const user = await getCurrentUser(req);
+    if (!user || user.role !== 'admin') {
+      return res.status(403).json({ error: 'Sem permissão.' });
+    }
+
+    res.json({ users: await getUsers() });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: 'Falha ao listar usuários.' });
+  }
+});
+
+app.post('/api/users', async (req, res) => {
+  try {
+    const user = await getCurrentUser(req);
+    if (!user || user.role !== 'admin') {
+      return res.status(403).json({ error: 'Sem permissão.' });
+    }
+
+    const username = String(req.body.username || '').trim();
+    const password = String(req.body.password || '');
+    const role = String(req.body.role || 'leitor').trim();
+
+    if (!username || !password) {
+      return res.status(400).json({ error: 'Login e senha são obrigatórios.' });
+    }
+
+    if (!['admin', 'editor', 'leitor'].includes(role)) {
+      return res.status(400).json({ error: 'Função inválida.' });
+    }
+
+    const exists = await query(`SELECT 1 FROM users WHERE LOWER(username) = LOWER($1)`, [username]);
+    if (exists.rows.length > 0) {
+      return res.status(409).json({ error: 'Esse usuário já existe.' });
+    }
+
+    const passwordHash = await bcrypt.hash(password, 10);
+    const result = await query(
+      `INSERT INTO users (username, password_hash, role) VALUES ($1, $2, $3) RETURNING id, username, role`,
+      [username, passwordHash, role]
+    );
+
+    res.status(201).json({ user: toSafeUser(result.rows[0]) });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: 'Falha ao criar usuário.' });
+  }
+});
+
+app.delete('/api/users/:username', async (req, res) => {
+  try {
+    const user = await getCurrentUser(req);
+    if (!user || user.role !== 'admin') {
+      return res.status(403).json({ error: 'Sem permissão.' });
+    }
+
+    const username = String(req.params.username || '').trim();
+    if (!username || username.toLowerCase() === 'admin') {
+      return res.status(400).json({ error: 'Não é possível remover esse usuário.' });
+    }
+
+    await query(`DELETE FROM users WHERE LOWER(username) = LOWER($1)`, [username]);
+    res.json({ ok: true });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: 'Falha ao remover usuário.' });
+  }
+});
+
+app.post('/api/configs/modules', async (req, res) => {
+  try {
+    const user = await getCurrentUser(req);
+    if (!user || user.role !== 'admin') {
+      return res.status(403).json({ error: 'Sem permissão.' });
+    }
+
+    const name = String(req.body.name || '').trim();
+    if (!name) {
+      return res.status(400).json({ error: 'Informe um módulo.' });
+    }
+
+    const configs = await setConfigs(current => {
+      const modules = Array.from(new Set([...current.modules, name]));
+      return { ...current, modules };
+    });
+
+    res.json({ configs });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: 'Falha ao adicionar módulo.' });
+  }
+});
+
+app.delete('/api/configs/modules/:name', async (req, res) => {
+  try {
+    const user = await getCurrentUser(req);
+    if (!user || user.role !== 'admin') {
+      return res.status(403).json({ error: 'Sem permissão.' });
+    }
+
+    const name = String(req.params.name || '');
+    const configs = await setConfigs(current => ({
+      ...current,
+      modules: current.modules.filter(item => item !== name)
+    }));
+
+    res.json({ configs });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: 'Falha ao remover módulo.' });
+  }
+});
+
+app.post('/api/configs/categories', async (req, res) => {
+  try {
+    const user = await getCurrentUser(req);
+    if (!user || user.role !== 'admin') {
+      return res.status(403).json({ error: 'Sem permissão.' });
+    }
+
+    const name = String(req.body.name || '').trim();
+    if (!name) {
+      return res.status(400).json({ error: 'Informe uma categoria.' });
+    }
+
+    const configs = await setConfigs(current => {
+      const categories = Array.from(new Set([...current.categories, name]));
+      return { ...current, categories };
+    });
+
+    res.json({ configs });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: 'Falha ao adicionar categoria.' });
+  }
+});
+
+app.delete('/api/configs/categories/:name', async (req, res) => {
+  try {
+    const user = await getCurrentUser(req);
+    if (!user || user.role !== 'admin') {
+      return res.status(403).json({ error: 'Sem permissão.' });
+    }
+
+    const name = String(req.params.name || '');
+    const configs = await setConfigs(current => ({
+      ...current,
+      categories: current.categories.filter(item => item !== name)
+    }));
+
+    res.json({ configs });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: 'Falha ao remover categoria.' });
+  }
+});
+
+app.get('*', (req, res) => {
+  res.sendFile(path.join(__dirname, 'index.html'));
+});
+
+async function start() {
+  try {
+    await ensureSchema();
+    app.listen(port, () => {
+      console.log(`Servidor rodando em http://localhost:${port}`);
+    });
+  } catch (error) {
+    console.error('Não foi possível iniciar o servidor.');
+    console.error(error);
+    process.exit(1);
+  }
+}
+
+start();

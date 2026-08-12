@@ -1,0 +1,130 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PR Sistemas - Base de Conhecimento | Knowledge Base</title>
+    <link rel="stylesheet" href="style.css">
+    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;600;700&display=swap" rel="stylesheet">
+    <script src="https://unpkg.com/@phosphor-icons/web"></script>
+</head>
+<body>
+
+    <div id="login-screen" class="overlay">
+        <div class="login-card">
+            <div class="brand"><i class="ph ph-lightning-bold"></i><span>PR Sistemas - Base de Conhecimento</span></div>
+            <h1>Acesso ao Sistema</h1>
+            <input type="text" id="login-user" placeholder="Usuário" autocomplete="off">
+            <input type="password" id="login-pass" placeholder="Senha">
+            <button class="btn-primary" id="btn-login-trigger" style="width:100%">Entrar</button>
+        </div>
+    </div>
+
+    <div id="app" class="hidden">
+        <aside class="sidebar">
+            <div class="sidebar-header"><i class="ph ph-lightning-bold"></i><span>PR Sistemas - Base de Conhecimento</span></div>
+            <nav class="nav-menu">
+                <div class="nav-section">PRINCIPAL</div>
+                <button class="nav-item active" id="nav-view-btn"><i class="ph ph-house"></i> Dashboard</button>
+                <button id="nav-editor" class="nav-item hidden"><i class="ph ph-plus-circle"></i> Gerenciar Artigos</button>
+                <div id="section-admin" class="hidden">
+                    <div class="nav-section">ADMINISTRAÇÃO</div>
+                    <button id="nav-settings-btn" class="nav-item"><i class="ph ph-gear"></i> Configurações</button>
+                </div>
+            </nav>
+            <div class="sidebar-footer">
+                <div class="user-profile">
+                    <div class="avatar" id="user-initial">A</div>
+                    <div class="user-details"><span id="logged-user-name">Usuário</span><small id="logged-user-role">Cargo</small></div>
+                </div>
+                <button class="btn-icon-logout" id="btn-logout-trigger"><i class="ph ph-sign-out"></i></button>
+            </div>
+        </aside>
+
+        <main class="main-content">
+            <section id="tab-view" class="tab-content">
+                <div class="page-header">
+                    <div><h1>Base de Conhecimento</h1><p>Consulte resoluções técnicas.</p></div>
+                    <div class="controls-bar">
+                        <div class="search-wrapper"><i class="ph ph-magnifying-glass"></i><input type="text" id="search-bar" placeholder="Buscar título..."></div>
+                        <select id="filter-module" class="filter-select"></select>
+                        <select id="filter-category" class="filter-select"></select>
+                    </div>
+                </div>
+                <div id="wiki-grid" class="wiki-grid"></div>
+            </section>
+
+            <section id="tab-create" class="tab-content hidden">
+                <div class="page-header"><h1 id="editor-title">Novo Registro</h1></div>
+                <form id="wiki-form" class="editor-container">
+                    <input type="hidden" id="post-id"> 
+                    <div class="editor-main">
+                        <input type="text" id="post-title" class="input-title" placeholder="Título do problema..." required>
+                        <div class="editor-row">
+                            <div class="input-field"><label>Módulo</label><select id="post-module" required></select></div>
+                            <div class="input-field"><label>Categoria</label><select id="post-category" required></select></div>
+                        </div>
+                        <div class="input-field"><label>Descrição do Problema</label><textarea id="post-problem" rows="5" required></textarea></div>
+                        <div class="input-field"><label>Resolução Aplicada</label><textarea id="post-solution" rows="8" required></textarea></div>
+                    </div>
+                    <div class="editor-side">
+                        <div class="upload-zone" style="margin-bottom:15px; padding:20px;">
+                            <i class="ph ph-warning-circle"></i><p>Anexo Problema</p>
+                            <span id="label-files-problem" style="font-size:11px">Nenhum</span>
+                            <input type="file" id="post-files-problem" multiple>
+                        </div>
+                        <div class="upload-zone" style="margin-bottom:20px; padding:20px;">
+                            <i class="ph ph-check-circle"></i><p>Anexo Solução</p>
+                            <span id="label-files-solution" style="font-size:11px">Nenhum</span>
+                            <input type="file" id="post-files-solution" multiple>
+                        </div>
+                        <button type="submit" class="btn-primary full-width" id="btn-save-post">Publicar na Wiki</button>
+                        <button type="button" class="btn-outline full-width hidden" id="btn-cancel-edit" style="margin-top:10px">Cancelar</button>
+                    </div>
+                </form>
+            </section>
+
+            <section id="tab-settings" class="tab-content hidden">
+                <div class="page-header"><h1>Configurações do Sistema</h1></div>
+                <div class="settings-grid">
+                    <div class="settings-card">
+                        <h3><i class="ph ph-package"></i> Módulos</h3>
+                        <div class="input-group-inline">
+                            <input type="text" id="new-module-name" placeholder="Novo módulo...">
+                            <button class="btn-outline" id="btn-add-module" type="button">Adicionar</button>
+                        </div>
+                        <div class="list-container" id="list-modules"></div>
+                    </div>
+                    <div class="settings-card">
+                        <h3><i class="ph ph-tag"></i> Categorias</h3>
+                        <div class="input-group-inline">
+                            <input type="text" id="new-category-name" placeholder="Nova categoria...">
+                            <button class="btn-outline" id="btn-add-category" type="button">Adicionar</button>
+                        </div>
+                        <div class="list-container" id="list-categories"></div>
+                    </div>
+                    <div class="settings-card" style="grid-column: 1 / -1;">
+                        <h3><i class="ph ph-users"></i> Gerenciar Usuários</h3>
+                        <div class="input-group-inline">
+                            <input type="text" id="new-username" placeholder="Login">
+                            <input type="password" id="new-password" placeholder="Senha">
+                            <select id="new-role"><option value="leitor">Leitor</option><option value="editor">Editor</option></select>
+                            <button class="btn-primary" id="btn-create-user" type="button">Criar Conta</button>
+                        </div>
+                        <div class="list-container" id="list-users"></div>
+                    </div>
+                </div>
+            </section>
+        </main>
+    </div>
+
+    <div id="modal-detail" class="modal-overlay hidden">
+        <div class="modal-view">
+            <header class="modal-header"><div id="modal-meta"></div><button class="btn-close" id="btn-close-modal"><i class="ph ph-x"></i></button></header>
+            <div id="modal-body" class="modal-body"></div>
+        </div>
+    </div>
+
+    <script src="script.js"></script>
+</body>
+</html>
