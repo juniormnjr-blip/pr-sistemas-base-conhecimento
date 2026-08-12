@@ -49,18 +49,18 @@ jobs:
         env:
           ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
           ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
-          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
           ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
         run: |
           test -n "$ANDROID_KEYSTORE_BASE64"
           test -n "$ANDROID_KEYSTORE_PASSWORD"
-          test -n "$ANDROID_KEY_ALIAS"
           test -n "$ANDROID_KEY_PASSWORD"
           echo "$ANDROID_KEYSTORE_BASE64" | base64 -d > android/release-keystore.p12
+          KEY_ALIAS=$(keytool -list -storetype PKCS12 -keystore android/release-keystore.p12 -storepass "$ANDROID_KEYSTORE_PASSWORD" | awk -F': ' '/Alias name:/{print $2; exit}')
+          test -n "$KEY_ALIAS"
           cat > android/key.properties <<EOF
           storeFile=release-keystore.p12
           storePassword=$ANDROID_KEYSTORE_PASSWORD
-          keyAlias=$ANDROID_KEY_ALIAS
+          keyAlias=$KEY_ALIAS
           keyPassword=$ANDROID_KEY_PASSWORD
           storeType=PKCS12
           EOF
