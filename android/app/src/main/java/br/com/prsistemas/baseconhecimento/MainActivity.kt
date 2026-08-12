@@ -56,7 +56,7 @@ class MainActivity : AppCompatActivity() {
             cacheMode = WebSettings.LOAD_DEFAULT
         }
 
-        webView.webViewClient = object : WebViewClient()
+        webView.webViewClient = object : WebViewClient() {}
         webView.webChromeClient = object : WebChromeClient() {
             override fun onShowFileChooser(
                 webView: WebView,
