@@ -4,4 +4,6 @@ node_modules/
 android/.gradle/
 android/build/
 android/app/build/
+android/key.properties
+android/release-keystore.p12
 local.properties
