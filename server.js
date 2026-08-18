@@ -15,6 +15,7 @@ const jwtSecret = process.env.JWT_SECRET || 'change-me-in-production';
 const databaseUrl = normalizeDatabaseUrl(process.env.DATABASE_URL);
 const fallbackDatabaseUrl = buildFallbackDatabaseUrl(databaseUrl);
 const unitVersionsSourceUrl = String(process.env.UNIT_VERSIONS_SOURCE_URL || '').trim();
+const unitVersionsIngestToken = String(process.env.UNIT_VERSIONS_INGEST_TOKEN || '').trim();
 const unitVersionsSyncIntervalMs = Math.max(Number(process.env.UNIT_VERSIONS_SYNC_INTERVAL_MS || 300000), 60000);
 const realtimeClients = new Set();
 let dbListenerClient = null;
@@ -375,6 +376,22 @@ function normalizeUnitVersionRecord(record) {
   };
 }
 
+function extractBearerToken(headerValue) {
+  const value = String(headerValue || '').trim();
+  const match = value.match(/^Bearer\s+(.+)$/i);
+  return match ? match[1].trim() : '';
+}
+
+function canAcceptUnitVersionIngest(req) {
+  if (!unitVersionsIngestToken) {
+    return false;
+  }
+
+  const bearerToken = extractBearerToken(req.headers.authorization);
+  const headerToken = String(req.headers['x-unit-versions-token'] || '').trim();
+  return bearerToken === unitVersionsIngestToken || headerToken === unitVersionsIngestToken;
+}
+
 async function getUnitVersions() {
   const result = await query(`SELECT * FROM unit_versions ORDER BY unit_name ASC`);
   return result.rows.map(toSafeUnitVersion);
@@ -573,7 +590,8 @@ app.get('/api/bootstrap', async (req, res) => {
       configs,
       users,
       unitVersions,
-      unitVersionsSourceConfigured: Boolean(unitVersionsSourceUrl)
+      unitVersionsSourceConfigured: Boolean(unitVersionsSourceUrl),
+      unitVersionsIngestConfigured: Boolean(unitVersionsIngestToken)
     });
   } catch (error) {
     console.error(error);
@@ -590,11 +608,47 @@ app.get('/api/unit-versions', async (req, res) => {
 
     res.json({
       unitVersions: await getUnitVersions(),
-      sourceConfigured: Boolean(unitVersionsSourceUrl)
+      sourceConfigured: Boolean(unitVersionsSourceUrl),
+      ingestConfigured: Boolean(unitVersionsIngestToken)
     });
   } catch (error) {
     console.error(error);
     res.status(500).json({ error: 'Falha ao listar versões da unidade.' });
+  }
+});
+
+app.post('/api/unit-versions/ingest', async (req, res) => {
+  try {
+    if (!canAcceptUnitVersionIngest(req)) {
+      return res.status(401).json({ error: 'Token inválido ou ausente.' });
+    }
+
+    const payload = req.body;
+    const records = extractUnitVersionRecords(payload)
+      .map(normalizeUnitVersionRecord)
+      .filter(Boolean);
+
+    if (records.length === 0) {
+      return res.status(400).json({ error: 'Nenhum registro de versão válido foi enviado.' });
+    }
+
+    for (const record of records) {
+      await upsertUnitVersion(record);
+    }
+
+    broadcastRealtimeChange({
+      type: 'unit-versions-updated',
+      records: records.map(record => record.unitName)
+    });
+
+    res.json({
+      ok: true,
+      processed: records.length,
+      unitVersions: await getUnitVersions()
+    });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: 'Falha ao receber versões da unidade.' });
   }
 });
 

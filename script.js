@@ -7,7 +7,8 @@ const state = {
     },
     users: [],
     unitVersions: [],
-    unitVersionsSourceConfigured: false
+    unitVersionsSourceConfigured: false,
+    unitVersionsIngestConfigured: false
 };
 
 let isReturningToLogin = false;
@@ -112,6 +113,7 @@ async function loadBootstrapData() {
     state.users = state.currentUser?.role === 'admin' ? (data.users || []) : [];
     state.unitVersions = data.unitVersions || [];
     state.unitVersionsSourceConfigured = Boolean(data.unitVersionsSourceConfigured);
+    state.unitVersionsIngestConfigured = Boolean(data.unitVersionsIngestConfigured);
 
     return data;
 }
@@ -762,9 +764,13 @@ function renderUnitVersions() {
     const unitVersions = Array.isArray(state.unitVersions) ? state.unitVersions : [];
 
     if (status) {
-        status.innerHTML = state.unitVersionsSourceConfigured
-            ? '<span class="sync-badge live"><i class="ph ph-broadcast"></i> Sincronização automática ativa no servidor</span>'
-            : '<span class="sync-badge muted"><i class="ph ph-plug"></i> Configure UNIT_VERSIONS_SOURCE_URL para ativar a coleta automática</span>';
+        if (state.unitVersionsSourceConfigured) {
+            status.innerHTML = '<span class="sync-badge live"><i class="ph ph-broadcast"></i> Sincronização automática ativa via servidor de origem</span>';
+        } else if (state.unitVersionsIngestConfigured) {
+            status.innerHTML = '<span class="sync-badge live"><i class="ph ph-cloud-arrow-up"></i> Agentes instalados estão enviando versões para a nuvem</span>';
+        } else {
+            status.innerHTML = '<span class="sync-badge muted"><i class="ph ph-plug"></i> Configure um servidor de origem ou o token do agente para ativar a coleta automática</span>';
+        }
     }
 
     if (syncButton) {

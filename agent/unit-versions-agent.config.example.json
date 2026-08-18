@@ -1,0 +1,9 @@
+{
+  "endpoint": "https://pr-sistemas-base-conhecimento.onrender.com/api/unit-versions/ingest",
+  "token": "COLE_AQUI_O_TOKEN",
+  "sourcePath": "C:/PR-Sistemas/unit-versions.json",
+  "pollIntervalMs": 30000,
+  "retryIntervalMs": 10000,
+  "watch": true,
+  "once": false
+}

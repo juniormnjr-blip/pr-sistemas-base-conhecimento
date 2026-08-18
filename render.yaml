@@ -16,3 +16,5 @@ services:
         value: true
       - key: UNIT_VERSIONS_SYNC_INTERVAL_MS
         value: 300000
+      - key: UNIT_VERSIONS_INGEST_TOKEN
+        generateValue: true
