@@ -478,30 +478,59 @@ async function startRealtimeListener() {
     return;
   }
 
-  dbListenerClient = await pool.connect();
-  await dbListenerClient.query(`LISTEN prs_realtime`);
+  const listenerConnectionString = fallbackDatabaseUrl || databaseUrl;
+  const listenerPool = listenerConnectionString === databaseUrl
+    ? pool
+    : new Pool({
+        connectionString: listenerConnectionString,
+        ssl: {
+          rejectUnauthorized: false
+        }
+      });
 
-  dbListenerClient.on('notification', notification => {
-    if (!notification || notification.channel !== 'prs_realtime') {
+  try {
+    dbListenerClient = await listenerPool.connect();
+    await dbListenerClient.query(`LISTEN prs_realtime`);
+
+    dbListenerClient.on('notification', notification => {
+      if (!notification || notification.channel !== 'prs_realtime') {
+        return;
+      }
+
+      let payload = {};
+      try {
+        payload = JSON.parse(notification.payload || '{}');
+      } catch (error) {
+        payload = { raw: notification.payload || null };
+      }
+
+      broadcastRealtimeChange({
+        type: 'db-change',
+        ...payload
+      });
+    });
+
+    dbListenerClient.on('error', error => {
+      console.error('Erro no listener realtime do PostgreSQL:', error);
+    });
+  } catch (error) {
+    if (dbListenerClient) {
+      try {
+        dbListenerClient.release();
+      } catch (releaseError) {
+        // ignore release errors
+      }
+      dbListenerClient = null;
+    }
+
+    const isDnsIssue = error?.code === 'ENOTFOUND' || /getaddrinfo ENOTFOUND/i.test(String(error?.message || ''));
+    if (isDnsIssue) {
+      console.warn('Listener realtime indisponível. O servidor continuará funcionando sem push em tempo real.');
       return;
     }
 
-    let payload = {};
-    try {
-      payload = JSON.parse(notification.payload || '{}');
-    } catch (error) {
-      payload = { raw: notification.payload || null };
-    }
-
-    broadcastRealtimeChange({
-      type: 'db-change',
-      ...payload
-    });
-  });
-
-  dbListenerClient.on('error', error => {
-    console.error('Erro no listener realtime do PostgreSQL:', error);
-  });
+    throw error;
+  }
 }
 
 async function setConfigs(updater) {
