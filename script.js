@@ -788,7 +788,9 @@ function renderUnitVersions() {
         const moduleMatches = Array.isArray(unit.moduleVersions) && unit.moduleVersions.some(item => {
             const moduleName = String(item.moduleName || '').toLowerCase();
             const version = String(item.version || '').toLowerCase();
-            return moduleName.includes(search) || version.includes(search);
+            const source = String(item.source || '').toLowerCase();
+            const observation = String(item.observation || '').toLowerCase();
+            return moduleName.includes(search) || version.includes(search) || source.includes(search) || observation.includes(search);
         });
 
         return unitName.includes(search) || companyMatches || moduleMatches;
@@ -813,8 +815,14 @@ function renderUnitVersions() {
         const rows = modules.length > 0
             ? modules.map(item => `
                 <div class="unit-version-row">
-                    <span class="unit-version-module">${escapeHTML(item.moduleName || 'Módulo')}</span>
-                    <strong class="unit-version-value">${escapeHTML(item.version || 'Sem versão')}</strong>
+                    <div class="unit-version-row-main">
+                        <span class="unit-version-module">${escapeHTML(item.moduleName || 'Módulo')}</span>
+                        <strong class="unit-version-value">${escapeHTML(item.version || 'Sem versão')}</strong>
+                    </div>
+                    <div class="unit-version-row-extra">
+                        ${item.source ? `<span><i class="ph ph-database"></i> ${escapeHTML(item.source)}</span>` : ''}
+                        ${item.observation ? `<span><i class="ph ph-note-pencil"></i> ${escapeHTML(item.observation)}</span>` : ''}
+                    </div>
                 </div>
             `).join('')
             : `

@@ -343,11 +343,15 @@ function normalizeModuleVersions(value) {
         ).trim();
         const version = String(item.version || item.versao || item.versionName || item.value || '').trim();
         const updatedAt = item.updatedAt || item.atualizadoEm || item.sourceUpdatedAt || null;
+        const source = String(item.source || item.fonte || item.origin || item.sourceName || '').trim();
+        const observation = String(item.observation || item.observacao || item.note || item.notes || '').trim();
 
         return {
           moduleName,
           version,
-          updatedAt
+          updatedAt,
+          source,
+          observation
         };
       })
       .filter(item => item && item.moduleName);
@@ -359,7 +363,10 @@ function normalizeModuleVersions(value) {
         moduleName: String(moduleName || '').trim(),
         version: typeof version === 'object' && version !== null
           ? String(version.version || version.versao || version.value || '').trim()
-          : String(version || '').trim()
+          : String(version || '').trim(),
+        updatedAt: typeof version === 'object' && version !== null ? (version.updatedAt || version.atualizadoEm || version.sourceUpdatedAt || null) : null,
+        source: typeof version === 'object' && version !== null ? String(version.source || version.fonte || version.origin || '').trim() : '',
+        observation: typeof version === 'object' && version !== null ? String(version.observation || version.observacao || version.note || '').trim() : ''
       }))
       .filter(item => item.moduleName);
   }
