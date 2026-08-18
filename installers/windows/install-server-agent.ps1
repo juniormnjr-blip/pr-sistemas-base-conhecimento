@@ -145,7 +145,8 @@ ORDER BY ordem;
     [int]$PollIntervalMs = 30000,
     [int]$RetryIntervalMs = 10000,
     [switch]$Watch,
-    [switch]$Once
+    [switch]$Once,
+    [switch]$Silent
 )
 
 $ErrorActionPreference = 'Stop'
@@ -343,25 +344,41 @@ function Read-SecretPlainText {
 }
 
 if (-not $Token) {
+    if ($Silent) {
+        throw 'Token ausente. Informe -Token quando usar -Silent.'
+    }
+
     $Token = Read-Host 'Token do Render (UNIT_VERSIONS_INGEST_TOKEN)'
 }
 
 if (-not $SqlConnectionString) {
-    if (-not $PSBoundParameters.ContainsKey('SqlServer')) {
+    if (-not $SqlServer) {
+        if ($Silent) {
+            throw 'Servidor SQL ausente. Informe -SqlServer ou -SqlConnectionString quando usar -Silent.'
+        }
+
         $value = Read-Host "Servidor SQL [$SqlServer]"
         if ($value) { $SqlServer = $value }
     }
 
-    if (-not $PSBoundParameters.ContainsKey('SqlDatabase')) {
+    if (-not $SqlDatabase) {
+        if ($Silent) {
+            throw 'Banco SQL ausente. Informe -SqlDatabase ou -SqlConnectionString quando usar -Silent.'
+        }
+
         $value = Read-Host "Banco SQL [$SqlDatabase]"
         if ($value) { $SqlDatabase = $value }
     }
 
-    if (-not $PSBoundParameters.ContainsKey('SqlUser')) {
-        $SqlUser = Read-Host 'Usuario SQL (Enter para Windows Auth)'
+    if (-not $SqlUser) {
+        if (-not $Silent) {
+            $SqlUser = Read-Host 'Usuario SQL (Enter para Windows Auth)'
+        }
+    } elseif (-not $SqlPassword -and $Silent) {
+        throw 'Senha SQL ausente. Informe -SqlPassword quando usar -Silent com autenticacao SQL.'
     }
 
-    if ($SqlUser) {
+    if ($SqlUser -and -not $Silent -and -not $SqlPassword) {
         $SqlPassword = Read-SecretPlainText 'Senha SQL'
     }
 }

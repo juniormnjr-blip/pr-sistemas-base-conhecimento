@@ -1,7 +1,8 @@
 [CmdletBinding()]
 param(
     [string]$OutputDir = '',
-    [string]$ExeName = 'PR-Sistemas-Unit-Versions-Server-Installer.exe'
+    [string]$ExeName = 'PR-Sistemas-Unit-Versions-Server-Installer.exe',
+    [switch]$Silent
 )
 
 $ErrorActionPreference = 'Stop'
@@ -13,6 +14,9 @@ function Write-Info {
 
 $repoRoot = Split-Path -Parent $PSScriptRoot
 $OutputDir = if ($OutputDir) { $OutputDir } else { Join-Path $repoRoot 'dist' }
+if ($Silent -and $ExeName -eq 'PR-Sistemas-Unit-Versions-Server-Installer.exe') {
+    $ExeName = 'PR-Sistemas-Unit-Versions-Server-Installer-Silent.exe'
+}
 $stagingRoot = Join-Path $PSScriptRoot 'staging-server-installer'
 $payloadRoot = Join-Path $stagingRoot 'payload'
 $bootstrapPath = Join-Path $stagingRoot 'bootstrap.ps1'
@@ -63,8 +67,63 @@ if (-not (Test-Path $payloadExtracted)) {
 }
 
 Set-Location $payloadExtracted
+'@
+
+if ($Silent) {
+    $bootstrapContent = @'
+[CmdletBinding()]
+param(
+    [Parameter(ValueFromRemainingArguments = $true)]
+    [string[]]$ArgsFromExe
+)
+
+$ErrorActionPreference = 'Stop'
+
+$here = Split-Path -Parent $MyInvocation.MyCommand.Path
+$payloadZip = Join-Path $here 'payload.zip'
+$payloadExtracted = Join-Path $here 'payload'
+$installer = Join-Path $payloadExtracted 'installers\windows\install-server-agent.ps1'
+
+if (-not (Test-Path $payloadZip)) {
+    throw "Arquivo payload.zip nao encontrado em $here"
+}
+
+if (-not (Test-Path $payloadExtracted)) {
+    New-Item -ItemType Directory -Force -Path $payloadExtracted | Out-Null
+    Expand-Archive -Path $payloadZip -DestinationPath $payloadExtracted -Force
+}
+
+Set-Location $payloadExtracted
+& powershell.exe -NoProfile -ExecutionPolicy Bypass -File $installer -Silent @ArgsFromExe
+'@
+} else {
+    $bootstrapContent = @'
+[CmdletBinding()]
+param(
+    [Parameter(ValueFromRemainingArguments = $true)]
+    [string[]]$ArgsFromExe
+)
+
+$ErrorActionPreference = 'Stop'
+
+$here = Split-Path -Parent $MyInvocation.MyCommand.Path
+$payloadZip = Join-Path $here 'payload.zip'
+$payloadExtracted = Join-Path $here 'payload'
+$installer = Join-Path $payloadExtracted 'installers\windows\install-server-agent.ps1'
+
+if (-not (Test-Path $payloadZip)) {
+    throw "Arquivo payload.zip nao encontrado em $here"
+}
+
+if (-not (Test-Path $payloadExtracted)) {
+    New-Item -ItemType Directory -Force -Path $payloadExtracted | Out-Null
+    Expand-Archive -Path $payloadZip -DestinationPath $payloadExtracted -Force
+}
+
+Set-Location $payloadExtracted
 & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $installer @ArgsFromExe
 '@
+}
 
 $bootstrapContent | Set-Content -Path $bootstrapPath -Encoding UTF8
 

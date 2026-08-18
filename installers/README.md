@@ -22,6 +22,12 @@ Exemplo:
 .\install-server-agent.ps1 -Token "COLE_AQUI_O_TOKEN" -SqlServer "SERVIDOR-SQL" -SqlDatabase "cadastro" -SqlUser "usuario_sql" -SqlPassword "SENHA_SQL"
 ```
 
+Para execucao silenciosa em lote, use o executavel:
+
+```powershell
+PR-Sistemas-Unit-Versions-Server-Installer-Silent.exe -Token "COLE_AQUI_O_TOKEN" -SqlConnectionString "Server=SERVIDOR-SQL;Database=cadastro;User ID=usuario_sql;Password=SENHA_SQL;TrustServerCertificate=True;"
+```
+
 Se preferir, também existe o atalho em lote:
 
 ```bat
