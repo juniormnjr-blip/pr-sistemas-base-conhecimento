@@ -227,16 +227,39 @@ function rowsToUnitVersionPayload(rows) {
       continue;
     }
 
-    const unitName = String(row.unitName || row.unit_name || row.unidade || row.nomeUnidade || row.name || '').trim();
+    const unitName = String(
+      row.unitName
+      || row.unit_name
+      || row.unidade
+      || row.nomeUnidade
+      || row.nome_empresa
+      || row.nomeEmpresa
+      || row.empresa
+      || row.name
+      || ''
+    ).trim();
     if (!unitName) {
       continue;
     }
 
     const existing = units.get(unitName) || {
       unitName,
+      companyNames: [],
       moduleVersions: [],
       sourceUpdatedAt: row.sourceUpdatedAt || row.source_updated_at || row.updatedAt || row.updated_at || null
     };
+
+    existing.companyNames = mergeUniqueStrings(existing.companyNames, [
+      row.companyName,
+      row.company_name,
+      row.nomeEmpresa,
+      row.nome_empresa,
+      row.empresa,
+      row.unitName,
+      row.unit_name,
+      row.unidade,
+      row.nomeUnidade
+    ]);
 
     const aggregated = row.moduleVersions || row.module_versions || row.modules || row.modulos;
     const normalizedAggregated = normalizeModuleVersions(aggregated);
@@ -251,12 +274,17 @@ function rowsToUnitVersionPayload(rows) {
 
     const moduleName = String(row.moduleName || row.module_name || row.modulo || row.nomeModulo || row.module || '').trim();
     const version = String(row.version || row.versao || row.version_name || row.value || '').trim();
+    const updatedAt = row.updatedAt || row.updated_at || row.sourceUpdatedAt || row.source_updated_at || row.ultimo_uso || row.ULTIMO_USO || row.datahora || row.DATAHORA || row.dthora || row.DTHORA || null;
+    const source = String(row.source || row.fonte || row.sourceName || row.fonteDados || '').trim();
+    const observation = String(row.observation || row.observacao || row.note || row.observacao_texto || '').trim();
 
     if (moduleName) {
       existing.moduleVersions = mergeModuleVersions(existing.moduleVersions, [{
         moduleName,
         version,
-        updatedAt: row.updatedAt || row.updated_at || row.sourceUpdatedAt || row.source_updated_at || null
+        updatedAt,
+        source,
+        observation
       }]);
     }
 
@@ -277,11 +305,22 @@ function mergeModuleVersions(current = [], incoming = []) {
     map.set(String(item.moduleName).trim().toLowerCase(), {
       moduleName: String(item.moduleName).trim(),
       version: String(item.version || '').trim(),
-      updatedAt: item.updatedAt || null
+      updatedAt: item.updatedAt || null,
+      source: String(item.source || '').trim(),
+      observation: String(item.observation || '').trim()
     });
   }
 
   return Array.from(map.values());
+}
+
+function mergeUniqueStrings(current = [], incoming = []) {
+  const values = [
+    ...current.map(item => String(item || '').trim()),
+    ...incoming.map(item => String(item || '').trim())
+  ].filter(Boolean);
+
+  return Array.from(new Set(values));
 }
 
 async function postPayload(payload) {

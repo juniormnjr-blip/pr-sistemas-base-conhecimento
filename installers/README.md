@@ -12,6 +12,28 @@ Exemplo:
 .\install-agent.ps1 -Token "COLE_AQUI_O_TOKEN" -SourcePath "C:\PR-Sistemas\unit-versions.json"
 ```
 
+Para servidores que consultam SQL Server diretamente, use o instalador novo:
+
+Use [installers/windows/install-server-agent.ps1](/C:/Users/User/Desktop/Base3/installers/windows/install-server-agent.ps1).
+
+Exemplo:
+
+```powershell
+.\install-server-agent.ps1 -Token "COLE_AQUI_O_TOKEN" -SqlServer "SERVIDOR-SQL" -SqlDatabase "cadastro" -SqlUser "usuario_sql" -SqlPassword "SENHA_SQL"
+```
+
+Se preferir, também existe o atalho em lote:
+
+```bat
+install-server-agent.cmd -Token "COLE_AQUI_O_TOKEN" -SqlConnectionString "Server=SERVIDOR-SQL;Database=cadastro;User ID=usuario_sql;Password=SENHA_SQL;TrustServerCertificate=True;"
+```
+
+Para remover a instalação, use:
+
+```powershell
+.\uninstall-server-agent.ps1
+```
+
 ## Linux
 
 Use [installers/linux/install-agent.sh](/C:/Users/User/Desktop/Base3/installers/linux/install-agent.sh).
@@ -34,6 +56,8 @@ O agente agora tambem entende `source.type = "sql"`. Nesse modo, o arquivo de co
 - `moduleName`
 - `version`
 - `updatedAt` opcional
+
+O instalador de servidor ja cria a configuracao nesse formato e registra a tarefa automatica.
 
 Exemplo de query:
 
