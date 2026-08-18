@@ -188,12 +188,18 @@ async function ensureSchema() {
     CREATE TABLE IF NOT EXISTS unit_versions (
       id SERIAL PRIMARY KEY,
       unit_name TEXT NOT NULL UNIQUE,
+      company_names JSONB NOT NULL DEFAULT '[]'::jsonb,
       module_versions JSONB NOT NULL DEFAULT '[]'::jsonb,
       source_updated_at TIMESTAMPTZ,
       synced_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
       updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );
+  `);
+
+  await query(`
+    ALTER TABLE unit_versions
+    ADD COLUMN IF NOT EXISTS company_names JSONB NOT NULL DEFAULT '[]'::jsonb;
   `);
 
   await query(`
@@ -278,12 +284,39 @@ function toSafeUnitVersion(row) {
   return {
     id: row.id,
     unitName: row.unit_name,
+    companyNames: normalizeCompanyNames(row.company_names),
     moduleVersions: normalizeModuleVersions(row.module_versions),
     sourceUpdatedAt: row.source_updated_at,
     syncedAt: row.synced_at,
     updatedAt: row.updated_at,
     createdAt: row.created_at
   };
+}
+
+function normalizeCompanyNames(value) {
+  if (!value) return [];
+
+  if (Array.isArray(value)) {
+    return value
+      .map(item => {
+        if (!item) return '';
+        if (typeof item === 'string') return String(item).trim();
+        if (typeof item === 'object') {
+          return String(item.companyName || item.company_name || item.nome || item.name || '').trim();
+        }
+        return String(item).trim();
+      })
+      .filter(Boolean);
+  }
+
+  if (typeof value === 'object') {
+    return Object.values(value)
+      .map(item => String(item || '').trim())
+      .filter(Boolean);
+  }
+
+  const text = String(value || '').trim();
+  return text ? [text] : [];
 }
 
 function normalizeModuleVersions(value) {
@@ -365,12 +398,16 @@ function normalizeUnitVersionRecord(record) {
     return null;
   }
 
+  const companyNames = normalizeCompanyNames(
+    record.companyNames || record.company_names || record.companies || record.empresas || record.companyName || record.company_name || []
+  );
   const moduleVersionsSource = record.moduleVersions || record.module_versions || record.modules || record.modulos || record.versions || record.versiones || {};
   const moduleVersions = normalizeModuleVersions(moduleVersionsSource);
   const sourceUpdatedAt = record.sourceUpdatedAt || record.updatedAt || record.atualizadoEm || record.syncedAt || null;
 
   return {
     unitName,
+    companyNames,
     moduleVersions,
     sourceUpdatedAt
   };
@@ -400,10 +437,11 @@ async function getUnitVersions() {
 async function upsertUnitVersion(record) {
   await query(
     `
-      INSERT INTO unit_versions (unit_name, module_versions, source_updated_at, synced_at, updated_at)
-      VALUES ($1, $2::jsonb, $3, NOW(), NOW())
+      INSERT INTO unit_versions (unit_name, company_names, module_versions, source_updated_at, synced_at, updated_at)
+      VALUES ($1, $2::jsonb, $3::jsonb, $4, NOW(), NOW())
       ON CONFLICT (unit_name)
       DO UPDATE SET
+        company_names = EXCLUDED.company_names,
         module_versions = EXCLUDED.module_versions,
         source_updated_at = EXCLUDED.source_updated_at,
         synced_at = NOW(),
@@ -411,6 +449,7 @@ async function upsertUnitVersion(record) {
     `,
     [
       record.unitName,
+      JSON.stringify(record.companyNames || []),
       JSON.stringify(record.moduleVersions || []),
       record.sourceUpdatedAt || null
     ]

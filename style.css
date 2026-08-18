@@ -383,6 +383,47 @@ textarea:focus {
     border-top: 1px solid var(--border);
 }
 
+.unit-version-section {
+    margin: 2px 0 0;
+    padding: 16px;
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    background: #f8fafc;
+}
+
+.unit-version-section-label {
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    font-weight: 700;
+    color: var(--text-muted);
+    margin-bottom: 12px;
+}
+
+.company-chip-list {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+}
+
+.company-chip {
+    display: inline-flex;
+    align-items: center;
+    padding: 8px 12px;
+    border-radius: 999px;
+    border: 1px solid rgba(25, 91, 255, 0.18);
+    background: rgba(25, 91, 255, 0.08);
+    color: var(--text-dark);
+    font-size: 12px;
+    font-weight: 600;
+}
+
+.company-chip.empty {
+    border-style: dashed;
+    background: transparent;
+    color: var(--text-muted);
+}
+
 .unit-version-row {
     display: flex;
     justify-content: space-between;

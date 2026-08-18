@@ -782,13 +782,16 @@ function renderUnitVersions() {
 
     const filtered = unitVersions.filter(unit => {
         const unitName = String(unit.unitName || '').toLowerCase();
+        const companyMatches = Array.isArray(unit.companyNames) && unit.companyNames.some(companyName => {
+            return String(companyName || '').toLowerCase().includes(search);
+        });
         const moduleMatches = Array.isArray(unit.moduleVersions) && unit.moduleVersions.some(item => {
             const moduleName = String(item.moduleName || '').toLowerCase();
             const version = String(item.version || '').toLowerCase();
             return moduleName.includes(search) || version.includes(search);
         });
 
-        return unitName.includes(search) || moduleMatches;
+        return unitName.includes(search) || companyMatches || moduleMatches;
     });
 
     if (filtered.length === 0) {
@@ -802,7 +805,11 @@ function renderUnitVersions() {
     }
 
     grid.innerHTML = filtered.map(unit => {
+        const companies = Array.isArray(unit.companyNames) ? unit.companyNames.filter(Boolean) : [];
         const modules = Array.isArray(unit.moduleVersions) ? unit.moduleVersions : [];
+        const companyChips = companies.length > 0
+            ? companies.map(companyName => `<span class="company-chip">${escapeHTML(companyName)}</span>`).join('')
+            : '<span class="company-chip empty">Nenhuma empresa encontrada</span>';
         const rows = modules.length > 0
             ? modules.map(item => `
                 <div class="unit-version-row">
@@ -821,12 +828,19 @@ function renderUnitVersions() {
             <article class="unit-version-card">
                 <div class="unit-version-header">
                     <div>
-                        <span class="tag tag-module">Unidade</span>
+                        <span class="tag tag-module">Empresa</span>
                         <h3>${escapeHTML(unit.unitName || '')}</h3>
                     </div>
                     <div class="unit-version-meta">
                         <span><i class="ph ph-clock"></i> ${escapeHTML(formatDateTime(unit.syncedAt || unit.updatedAt || unit.createdAt))}</span>
+                        <span><i class="ph ph-buildings"></i> ${companies.length} empresa(s)</span>
                         <span><i class="ph ph-database"></i> ${modules.length} módulo(s)</span>
+                    </div>
+                </div>
+                <div class="unit-version-section">
+                    <div class="unit-version-section-label">Nomes das empresas encontrados no banco</div>
+                    <div class="company-chip-list">
+                        ${companyChips}
                     </div>
                 </div>
                 <div class="unit-version-list">
