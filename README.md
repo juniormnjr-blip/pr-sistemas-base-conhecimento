@@ -134,6 +134,8 @@ Para executar o agente:
 node agent/unit-versions-agent.mjs --config agent/unit-versions-agent.config.json
 ```
 
+Os instaladores prontos estao em [`installers/README.md`](/C:/Users/User/Desktop/Base3/installers/README.md), com opcoes para Windows Server e Linux.
+
 ## App Android
 
 Tambem deixei o projeto preparado para gerar um APK Android que abre a versao publicada na nuvem.
