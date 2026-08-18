@@ -25,3 +25,23 @@ sudo bash install-agent.sh
 ```
 
 Os dois instaladores criam o arquivo de configuracao, copiam o agente e deixam o processo automatico ao iniciar o servidor.
+
+## Modo SQL
+
+O agente agora tambem entende `source.type = "sql"`. Nesse modo, o arquivo de configuracao aponta para o banco SQL Server local e para a query que deve retornar as colunas:
+
+- `unitName`
+- `moduleName`
+- `version`
+- `updatedAt` opcional
+
+Exemplo de query:
+
+```sql
+SELECT
+  UnidadeNome AS unitName,
+  ModuloNome AS moduleName,
+  Versao AS version,
+  DataAtualizacao AS updatedAt
+FROM VersoesDaUnidade
+```

@@ -1,9 +1,15 @@
 {
   "endpoint": "https://pr-sistemas-base-conhecimento.onrender.com/api/unit-versions/ingest",
   "token": "COLE_AQUI_O_TOKEN",
-  "sourcePath": "C:/PR-Sistemas/unit-versions.json",
+  "source": {
+    "type": "sql",
+    "sql": {
+      "connectionString": "Server=localhost;Database=PRSistemas;Trusted_Connection=True;TrustServerCertificate=True;",
+      "query": "SELECT UnidadeNome AS unitName, ModuloNome AS moduleName, Versao AS version, DataAtualizacao AS updatedAt FROM VersoesDaUnidade"
+    }
+  },
   "pollIntervalMs": 30000,
   "retryIntervalMs": 10000,
-  "watch": true,
+  "watch": false,
   "once": false
 }

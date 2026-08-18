@@ -87,7 +87,7 @@ Tambem sao aceitos campos equivalentes como `unidade`, `unit`, `modules`, `modul
 
 Se voce quiser instalar um arquivo direto no servidor para enviar as informacoes automaticamente para a nuvem, use o agente em [`agent/unit-versions-agent.mjs`](C:/Users/User/Desktop/Base3/agent/unit-versions-agent.mjs).
 
-Ele pode ler um JSON local ou executar um comando que devolve JSON e enviar tudo para:
+Ele pode ler um JSON local, executar um comando que devolve JSON ou consultar um banco SQL Server local, e enviar tudo para:
 
 `POST /api/unit-versions/ingest`
 
@@ -97,14 +97,20 @@ Exemplo de configuracao:
 {
   "endpoint": "https://pr-sistemas-base-conhecimento.onrender.com/api/unit-versions/ingest",
   "token": "COLE_AQUI_O_TOKEN",
-  "sourcePath": "C:/PR-Sistemas/unit-versions.json",
+  "source": {
+    "type": "sql",
+    "sql": {
+      "connectionString": "Server=localhost;Database=PRSistemas;Trusted_Connection=True;TrustServerCertificate=True;",
+      "query": "SELECT UnidadeNome AS unitName, ModuloNome AS moduleName, Versao AS version, DataAtualizacao AS updatedAt FROM VersoesDaUnidade"
+    }
+  },
   "pollIntervalMs": 30000,
   "retryIntervalMs": 10000,
-  "watch": true
+  "watch": false
 }
 ```
 
-Exemplo de arquivo local:
+Se voce preferir manter um arquivo JSON ou usar um comando, tambem funciona:
 
 ```json
 {
@@ -126,6 +132,24 @@ Tambem e aceito um objeto simples:
     "Fiscal": "3.4.1"
   }
 }
+```
+
+No modo SQL, o ideal e a consulta retornar uma linha por modulo, com estes alias:
+
+- `unitName`
+- `moduleName`
+- `version`
+- `updatedAt` opcional
+
+Exemplo de consulta:
+
+```sql
+SELECT
+  UnidadeNome AS unitName,
+  ModuloNome AS moduleName,
+  Versao AS version,
+  DataAtualizacao AS updatedAt
+FROM VersoesDaUnidade
 ```
 
 Para executar o agente:
