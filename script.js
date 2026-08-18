@@ -9,6 +9,9 @@ const state = {
 };
 
 let isReturningToLogin = false;
+let realtimeSource = null;
+let realtimeReconnectTimer = null;
+let realtimeSyncInFlight = null;
 
 document.addEventListener('DOMContentLoaded', () => {
     setupEventListeners();
@@ -75,26 +78,35 @@ function setupEventListeners() {
 
 async function bootstrapApp() {
     try {
-        const data = await api('/api/bootstrap');
-
-        state.currentUser = data.user || null;
-        state.posts = data.posts || [];
-        state.configs = data.configs || state.configs;
-        state.users = data.users || [];
+        await loadBootstrapData();
 
         history.replaceState({ page: 'login' }, '', window.location.pathname);
 
         if (state.currentUser) {
             history.pushState({ page: 'app' }, '', '#app');
             initAppUI();
+            startRealtimeSync();
         } else {
+            stopRealtimeSync();
             showLoginScreen();
         }
     } catch (error) {
         console.error(error);
         alert('Não foi possível conectar ao servidor. Verifique se o backend está rodando.');
+        stopRealtimeSync();
         showLoginScreen();
     }
+}
+
+async function loadBootstrapData() {
+    const data = await api('/api/bootstrap');
+
+    state.currentUser = data.user || null;
+    state.posts = data.posts || [];
+    state.configs = data.configs || state.configs;
+    state.users = state.currentUser?.role === 'admin' ? (data.users || []) : [];
+
+    return data;
 }
 
 async function api(url, options = {}) {
@@ -153,6 +165,7 @@ async function logout() {
         console.error(error);
     }
 
+    stopRealtimeSync();
     returnToLogin();
 }
 
@@ -160,6 +173,7 @@ function returnToLogin() {
     isReturningToLogin = true;
 
     state.currentUser = null;
+    stopRealtimeSync();
 
     showLoginScreen();
 
@@ -278,6 +292,124 @@ async function handleFormSubmit(event) {
         alert(error.message || 'Não foi possível salvar o artigo.');
         console.error(error);
     }
+}
+
+function startRealtimeSync() {
+    if (!state.currentUser || typeof EventSource === 'undefined') {
+        return;
+    }
+
+    stopRealtimeSync();
+
+    realtimeSource = new EventSource('/api/events', { withCredentials: true });
+    realtimeSource.onmessage = handleRealtimeMessage;
+    realtimeSource.onerror = handleRealtimeError;
+}
+
+function stopRealtimeSync() {
+    if (realtimeReconnectTimer) {
+        clearTimeout(realtimeReconnectTimer);
+        realtimeReconnectTimer = null;
+    }
+
+    if (realtimeSource) {
+        realtimeSource.close();
+        realtimeSource = null;
+    }
+}
+
+function handleRealtimeError() {
+    if (!state.currentUser) {
+        return;
+    }
+
+    if (realtimeReconnectTimer) {
+        return;
+    }
+
+    if (realtimeSource) {
+        realtimeSource.close();
+        realtimeSource = null;
+    }
+
+    realtimeReconnectTimer = setTimeout(() => {
+        realtimeReconnectTimer = null;
+
+        if (state.currentUser) {
+            startRealtimeSync();
+        }
+    }, 3000);
+}
+
+function handleRealtimeMessage(event) {
+    if (!state.currentUser || !event.data) {
+        return;
+    }
+
+    let payload = null;
+
+    try {
+        payload = JSON.parse(event.data);
+    } catch (error) {
+        payload = null;
+    }
+
+    if (!payload || payload.type === 'connected') {
+        return;
+    }
+
+    syncRealtimeState();
+}
+
+async function syncRealtimeState() {
+    if (!state.currentUser || realtimeSyncInFlight) {
+        return realtimeSyncInFlight;
+    }
+
+    realtimeSyncInFlight = (async () => {
+        const activeTab = document.querySelector('.tab-content:not(.hidden)')?.id?.replace('tab-', '') || 'view';
+        const editingId = document.getElementById('post-id').value;
+        const isEditing = Boolean(editingId);
+        const savedModule = document.getElementById('post-module').value;
+        const savedCategory = document.getElementById('post-category').value;
+        const savedFilterModule = document.getElementById('filter-module').value;
+        const savedFilterCategory = document.getElementById('filter-category').value;
+
+        const data = await loadBootstrapData();
+        if (!data.user) {
+            stopRealtimeSync();
+            returnToLogin();
+            return;
+        }
+
+        refreshDropdowns({
+            savedModule,
+            savedCategory,
+            savedFilterModule,
+            savedFilterCategory
+        });
+        renderAdminLists();
+        renderCards();
+
+        if (isEditing && editingId) {
+            const post = state.posts.find(item => String(item.id) === String(editingId));
+            if (post) {
+                document.getElementById('post-title').value = post.title || '';
+                document.getElementById('post-module').value = post.module || '';
+                document.getElementById('post-category').value = post.category || '';
+                document.getElementById('post-problem').value = post.problem || '';
+                document.getElementById('post-solution').value = post.solution || '';
+            }
+        }
+
+        showTab(activeTab);
+    })().catch(error => {
+        console.error('Falha ao sincronizar realtime.', error);
+    }).finally(() => {
+        realtimeSyncInFlight = null;
+    });
+
+    return realtimeSyncInFlight;
 }
 
 function filesToBase64(fileList) {
@@ -608,8 +740,12 @@ function renderAdminLists() {
     `).join('');
 }
 
-function refreshDropdowns() {
+function refreshDropdowns(previousValues = {}) {
     const configs = state.configs;
+    const currentModule = previousValues.savedModule ?? document.getElementById('post-module').value;
+    const currentCategory = previousValues.savedCategory ?? document.getElementById('post-category').value;
+    const currentFilterModule = previousValues.savedFilterModule ?? document.getElementById('filter-module').value;
+    const currentFilterCategory = previousValues.savedFilterCategory ?? document.getElementById('filter-category').value;
 
     const moduleOptions = configs.modules.map(module => `
         <option value="${escapeAttr(module)}">${escapeHTML(module)}</option>
@@ -620,18 +756,30 @@ function refreshDropdowns() {
     `).join('');
 
     document.getElementById('post-module').innerHTML = moduleOptions;
+    if (configs.modules.includes(currentModule)) {
+        document.getElementById('post-module').value = currentModule;
+    }
 
     document.getElementById('filter-module').innerHTML = `
         <option value="">Todos os Módulos</option>
         ${moduleOptions}
     `;
+    if (configs.modules.includes(currentFilterModule)) {
+        document.getElementById('filter-module').value = currentFilterModule;
+    }
 
     document.getElementById('post-category').innerHTML = categoryOptions;
+    if (configs.categories.includes(currentCategory)) {
+        document.getElementById('post-category').value = currentCategory;
+    }
 
     document.getElementById('filter-category').innerHTML = `
         <option value="">Todas as Categorias</option>
         ${categoryOptions}
     `;
+    if (configs.categories.includes(currentFilterCategory)) {
+        document.getElementById('filter-category').value = currentFilterCategory;
+    }
 }
 
 async function refreshAdminUsers() {

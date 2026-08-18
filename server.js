@@ -14,6 +14,8 @@ const port = Number(process.env.PORT) || 3000;
 const jwtSecret = process.env.JWT_SECRET || 'change-me-in-production';
 const databaseUrl = normalizeDatabaseUrl(process.env.DATABASE_URL);
 const fallbackDatabaseUrl = buildFallbackDatabaseUrl(databaseUrl);
+const realtimeClients = new Set();
+let dbListenerClient = null;
 
 if (!databaseUrl) {
   console.warn('AVISO: DATABASE_URL não definido. O servidor precisa de um PostgreSQL na nuvem ou local.');
@@ -184,6 +186,48 @@ async function ensureSchema() {
     ON CONFLICT (id) DO NOTHING;
   `);
 
+  await query(`
+    CREATE OR REPLACE FUNCTION notify_realtime_change()
+    RETURNS trigger
+    LANGUAGE plpgsql
+    AS $$
+    BEGIN
+      PERFORM pg_notify(
+        'prs_realtime',
+        json_build_object(
+          'table', TG_TABLE_NAME,
+          'operation', TG_OP,
+          'changed_at', NOW()
+        )::text
+      );
+
+      RETURN COALESCE(NEW, OLD);
+    END;
+    $$;
+  `);
+
+  const realtimeTables = ['users', 'settings', 'posts'];
+  for (const tableName of realtimeTables) {
+    await query(`
+      DO $$
+      BEGIN
+        IF NOT EXISTS (
+          SELECT 1
+          FROM pg_trigger t
+          JOIN pg_class c ON c.oid = t.tgrelid
+          WHERE t.tgname = 'prs_realtime_${tableName}_trigger'
+            AND c.relname = '${tableName}'
+        ) THEN
+          CREATE TRIGGER prs_realtime_${tableName}_trigger
+          AFTER INSERT OR UPDATE OR DELETE ON ${tableName}
+          FOR EACH ROW
+          EXECUTE FUNCTION notify_realtime_change();
+        END IF;
+      END;
+      $$;
+    `);
+  }
+
   const adminCount = await query(`SELECT COUNT(*)::int AS total FROM users;`);
   if (adminCount.rows[0].total === 0) {
     const passwordHash = await bcrypt.hash('admin', 10);
@@ -210,6 +254,51 @@ async function getCurrentUser(req) {
 async function getConfigs() {
   const result = await query(`SELECT modules, categories FROM settings WHERE id = 1`);
   return toSafeConfig(result.rows[0]);
+}
+
+function broadcastRealtimeChange(payload) {
+  const message = `data: ${JSON.stringify(payload)}\n\n`;
+
+  for (const client of realtimeClients) {
+    try {
+      client.write(message);
+    } catch (error) {
+      realtimeClients.delete(client);
+    }
+  }
+}
+
+async function startRealtimeListener() {
+  requireDatabase();
+
+  if (dbListenerClient) {
+    return;
+  }
+
+  dbListenerClient = await pool.connect();
+  await dbListenerClient.query(`LISTEN prs_realtime`);
+
+  dbListenerClient.on('notification', notification => {
+    if (!notification || notification.channel !== 'prs_realtime') {
+      return;
+    }
+
+    let payload = {};
+    try {
+      payload = JSON.parse(notification.payload || '{}');
+    } catch (error) {
+      payload = { raw: notification.payload || null };
+    }
+
+    broadcastRealtimeChange({
+      type: 'db-change',
+      ...payload
+    });
+  });
+
+  dbListenerClient.on('error', error => {
+    console.error('Erro no listener realtime do PostgreSQL:', error);
+  });
 }
 
 async function setConfigs(updater) {
@@ -250,6 +339,39 @@ app.get('/api/bootstrap', async (req, res) => {
   } catch (error) {
     console.error(error);
     res.status(500).json({ error: 'Não foi possível carregar os dados.' });
+  }
+});
+
+app.get('/api/events', async (req, res) => {
+  try {
+    const user = await getCurrentUser(req);
+    if (!user) {
+      return res.status(401).json({ error: 'Não autorizado.' });
+    }
+
+    res.writeHead(200, {
+      'Content-Type': 'text/event-stream',
+      'Cache-Control': 'no-cache, no-transform',
+      Connection: 'keep-alive',
+      'X-Accel-Buffering': 'no'
+    });
+
+    res.write('retry: 3000\n\n');
+    res.write(`data: ${JSON.stringify({ type: 'connected' })}\n\n`);
+
+    realtimeClients.add(res);
+
+    const heartbeat = setInterval(() => {
+      res.write(': keep-alive\n\n');
+    }, 25000);
+
+    req.on('close', () => {
+      clearInterval(heartbeat);
+      realtimeClients.delete(res);
+    });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: 'Falha ao abrir o canal realtime.' });
   }
 });
 
@@ -615,6 +737,7 @@ app.get('*', (req, res) => {
 async function start() {
   try {
     await ensureSchema();
+    await startRealtimeListener();
     app.listen(port, () => {
       console.log(`Servidor rodando em http://localhost:${port}`);
     });

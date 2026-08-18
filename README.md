@@ -46,6 +46,8 @@ npm start
 
 Os anexos estao sendo armazenados em `jsonb` no PostgreSQL como base64. Isso funciona bem para imagens pequenas e medias, mas para muitos arquivos ou imagens grandes o ideal e mover os anexos para um storage de objetos, como Supabase Storage, S3 ou Cloudflare R2.
 
+O sistema agora tambem sincroniza alteracoes em tempo real: o PostgreSQL notifica o backend e o frontend atualizado recebe os dados sem precisar recarregar a pagina.
+
 ## App Android
 
 Tambem deixei o projeto preparado para gerar um APK Android que abre a versao publicada na nuvem.
