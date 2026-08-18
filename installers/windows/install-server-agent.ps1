@@ -1,7 +1,6 @@
 [CmdletBinding()]
 param(
     [string]$Endpoint = 'https://pr-sistemas-base-conhecimento.onrender.com/api/unit-versions/ingest',
-    [Parameter(Mandatory = $true)]
     [string]$Token,
     [string]$InstallDir = "$env:ProgramData\PR-Sistemas-UnitVersionsAgent",
     [string]$TaskName = 'PR Sistemas Unit Versions Agent',
@@ -325,6 +324,46 @@ function Register-AgentTask {
 
 if (-not (Test-Administrator)) {
     throw 'Execute este instalador em um PowerShell com permissao de administrador.'
+}
+
+function Read-SecretPlainText {
+    param([string]$Prompt)
+
+    $secure = Read-Host $Prompt -AsSecureString
+    if (-not $secure) {
+        return ''
+    }
+
+    $bstr = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($secure)
+    try {
+        return [Runtime.InteropServices.Marshal]::PtrToStringBSTR($bstr)
+    } finally {
+        [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($bstr)
+    }
+}
+
+if (-not $Token) {
+    $Token = Read-Host 'Token do Render (UNIT_VERSIONS_INGEST_TOKEN)'
+}
+
+if (-not $SqlConnectionString) {
+    if (-not $PSBoundParameters.ContainsKey('SqlServer')) {
+        $value = Read-Host "Servidor SQL [$SqlServer]"
+        if ($value) { $SqlServer = $value }
+    }
+
+    if (-not $PSBoundParameters.ContainsKey('SqlDatabase')) {
+        $value = Read-Host "Banco SQL [$SqlDatabase]"
+        if ($value) { $SqlDatabase = $value }
+    }
+
+    if (-not $PSBoundParameters.ContainsKey('SqlUser')) {
+        $SqlUser = Read-Host 'Usuario SQL (Enter para Windows Auth)'
+    }
+
+    if ($SqlUser) {
+        $SqlPassword = Read-SecretPlainText 'Senha SQL'
+    }
 }
 
 $repoRoot = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
