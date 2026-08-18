@@ -14,3 +14,5 @@ services:
         generateValue: true
       - key: PGSSL
         value: true
+      - key: UNIT_VERSIONS_SYNC_INTERVAL_MS
+        value: 300000

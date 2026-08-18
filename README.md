@@ -48,6 +48,31 @@ Os anexos estao sendo armazenados em `jsonb` no PostgreSQL como base64. Isso fun
 
 O sistema agora tambem sincroniza alteracoes em tempo real: o PostgreSQL notifica o backend e o frontend atualizado recebe os dados sem precisar recarregar a pagina.
 
+### Versões na unidade
+
+A aba **Versões na Unidade** busca um JSON de um servidor externo, grava no PostgreSQL da nuvem e atualiza a tela automaticamente.
+
+Configure estas variáveis de ambiente no Render ou no seu `.env`:
+
+- `UNIT_VERSIONS_SOURCE_URL`
+- `UNIT_VERSIONS_SYNC_INTERVAL_MS`
+
+Formato aceito do JSON de origem:
+
+```json
+[
+  {
+    "unitName": "Unidade Centro",
+    "moduleVersions": [
+      { "moduleName": "Financeiro", "version": "1.2.0" },
+      { "moduleName": "Fiscal", "version": "3.4.1" }
+    ]
+  }
+]
+```
+
+Também são aceitos campos equivalentes como `unidade`, `unit`, `modules`, `modulos`, `version` e `versao`.
+
 ## App Android
 
 Tambem deixei o projeto preparado para gerar um APK Android que abre a versao publicada na nuvem.

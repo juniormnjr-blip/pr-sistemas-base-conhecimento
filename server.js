@@ -14,8 +14,11 @@ const port = Number(process.env.PORT) || 3000;
 const jwtSecret = process.env.JWT_SECRET || 'change-me-in-production';
 const databaseUrl = normalizeDatabaseUrl(process.env.DATABASE_URL);
 const fallbackDatabaseUrl = buildFallbackDatabaseUrl(databaseUrl);
+const unitVersionsSourceUrl = String(process.env.UNIT_VERSIONS_SOURCE_URL || '').trim();
+const unitVersionsSyncIntervalMs = Math.max(Number(process.env.UNIT_VERSIONS_SYNC_INTERVAL_MS || 300000), 60000);
 const realtimeClients = new Set();
 let dbListenerClient = null;
+let unitVersionsSyncTimer = null;
 
 if (!databaseUrl) {
   console.warn('AVISO: DATABASE_URL não definido. O servidor precisa de um PostgreSQL na nuvem ou local.');
@@ -181,6 +184,18 @@ async function ensureSchema() {
   `);
 
   await query(`
+    CREATE TABLE IF NOT EXISTS unit_versions (
+      id SERIAL PRIMARY KEY,
+      unit_name TEXT NOT NULL UNIQUE,
+      module_versions JSONB NOT NULL DEFAULT '[]'::jsonb,
+      source_updated_at TIMESTAMPTZ,
+      synced_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+  `);
+
+  await query(`
     INSERT INTO settings (id, modules, categories)
     VALUES (1, '["Geral"]'::jsonb, '["Erro"]'::jsonb)
     ON CONFLICT (id) DO NOTHING;
@@ -206,7 +221,7 @@ async function ensureSchema() {
     $$;
   `);
 
-  const realtimeTables = ['users', 'settings', 'posts'];
+  const realtimeTables = ['users', 'settings', 'posts', 'unit_versions'];
   for (const tableName of realtimeTables) {
     await query(`
       DO $$
@@ -254,6 +269,194 @@ async function getCurrentUser(req) {
 async function getConfigs() {
   const result = await query(`SELECT modules, categories FROM settings WHERE id = 1`);
   return toSafeConfig(result.rows[0]);
+}
+
+function toSafeUnitVersion(row) {
+  if (!row) return null;
+
+  return {
+    id: row.id,
+    unitName: row.unit_name,
+    moduleVersions: normalizeModuleVersions(row.module_versions),
+    sourceUpdatedAt: row.source_updated_at,
+    syncedAt: row.synced_at,
+    updatedAt: row.updated_at,
+    createdAt: row.created_at
+  };
+}
+
+function normalizeModuleVersions(value) {
+  if (!value) return [];
+
+  if (Array.isArray(value)) {
+    return value
+      .map(item => {
+        if (!item) return null;
+
+        if (typeof item === 'string') {
+          return { moduleName: item, version: '' };
+        }
+
+        if (Array.isArray(item)) {
+          return {
+            moduleName: String(item[0] || '').trim(),
+            version: String(item[1] || '').trim()
+          };
+        }
+
+        const moduleName = String(
+          item.moduleName || item.module || item.name || item.modulo || item.module_name || ''
+        ).trim();
+        const version = String(item.version || item.versao || item.versionName || item.value || '').trim();
+        const updatedAt = item.updatedAt || item.atualizadoEm || item.sourceUpdatedAt || null;
+
+        return {
+          moduleName,
+          version,
+          updatedAt
+        };
+      })
+      .filter(item => item && item.moduleName);
+  }
+
+  if (typeof value === 'object') {
+    return Object.entries(value)
+      .map(([moduleName, version]) => ({
+        moduleName: String(moduleName || '').trim(),
+        version: typeof version === 'object' && version !== null
+          ? String(version.version || version.versao || version.value || '').trim()
+          : String(version || '').trim()
+      }))
+      .filter(item => item.moduleName);
+  }
+
+  return [];
+}
+
+function extractUnitVersionRecords(payload) {
+  if (!payload) return [];
+
+  if (Array.isArray(payload)) {
+    return payload;
+  }
+
+  if (typeof payload === 'object') {
+    const keys = ['unitVersions', 'unit_versions', 'units', 'unidades', 'items', 'data', 'results', 'records'];
+    for (const key of keys) {
+      if (Array.isArray(payload[key])) {
+        return payload[key];
+      }
+    }
+
+    if (payload.unitName || payload.unit || payload.unidade) {
+      return [payload];
+    }
+  }
+
+  return [];
+}
+
+function normalizeUnitVersionRecord(record) {
+  if (!record) return null;
+
+  const unitName = String(record.unitName || record.unit || record.unidade || record.name || '').trim();
+  if (!unitName) {
+    return null;
+  }
+
+  const moduleVersionsSource = record.moduleVersions || record.module_versions || record.modules || record.modulos || record.versions || record.versiones || {};
+  const moduleVersions = normalizeModuleVersions(moduleVersionsSource);
+  const sourceUpdatedAt = record.sourceUpdatedAt || record.updatedAt || record.atualizadoEm || record.syncedAt || null;
+
+  return {
+    unitName,
+    moduleVersions,
+    sourceUpdatedAt
+  };
+}
+
+async function getUnitVersions() {
+  const result = await query(`SELECT * FROM unit_versions ORDER BY unit_name ASC`);
+  return result.rows.map(toSafeUnitVersion);
+}
+
+async function upsertUnitVersion(record) {
+  await query(
+    `
+      INSERT INTO unit_versions (unit_name, module_versions, source_updated_at, synced_at, updated_at)
+      VALUES ($1, $2::jsonb, $3, NOW(), NOW())
+      ON CONFLICT (unit_name)
+      DO UPDATE SET
+        module_versions = EXCLUDED.module_versions,
+        source_updated_at = EXCLUDED.source_updated_at,
+        synced_at = NOW(),
+        updated_at = NOW()
+    `,
+    [
+      record.unitName,
+      JSON.stringify(record.moduleVersions || []),
+      record.sourceUpdatedAt || null
+    ]
+  );
+}
+
+async function syncUnitVersionsFromSource() {
+  if (!unitVersionsSourceUrl) {
+    return { synced: false, reason: 'UNIT_VERSIONS_SOURCE_URL not configured' };
+  }
+
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 15000);
+
+  try {
+    const response = await fetch(unitVersionsSourceUrl, {
+      method: 'GET',
+      headers: {
+        Accept: 'application/json'
+      },
+      signal: controller.signal
+    });
+
+    if (!response.ok) {
+      throw new Error(`Source server returned HTTP ${response.status}`);
+    }
+
+    const payload = await response.json();
+    const records = extractUnitVersionRecords(payload)
+      .map(normalizeUnitVersionRecord)
+      .filter(Boolean);
+
+    for (const record of records) {
+      await upsertUnitVersion(record);
+    }
+
+    return {
+      synced: true,
+      total: records.length
+    };
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+function startUnitVersionSyncScheduler() {
+  if (!unitVersionsSourceUrl || unitVersionsSyncTimer) {
+    return;
+  }
+
+  const runSync = async () => {
+    try {
+      const result = await syncUnitVersionsFromSource();
+      if (result?.synced) {
+        console.log(`Sincronização de versões concluída: ${result.total} unidade(s).`);
+      }
+    } catch (error) {
+      console.error('Falha ao sincronizar versões da unidade:', error);
+    }
+  };
+
+  runSync();
+  unitVersionsSyncTimer = setInterval(runSync, unitVersionsSyncIntervalMs);
 }
 
 function broadcastRealtimeChange(payload) {
@@ -332,13 +535,58 @@ async function getUsers() {
 app.get('/api/bootstrap', async (req, res) => {
   try {
     const user = await getCurrentUser(req);
-    const [posts, configs] = await Promise.all([getPosts(), getConfigs()]);
+    const [posts, configs, unitVersions] = await Promise.all([getPosts(), getConfigs(), getUnitVersions()]);
     const users = user?.role === 'admin' ? await getUsers() : [];
 
-    res.json({ user, posts, configs, users });
+    res.json({
+      user,
+      posts,
+      configs,
+      users,
+      unitVersions,
+      unitVersionsSourceConfigured: Boolean(unitVersionsSourceUrl)
+    });
   } catch (error) {
     console.error(error);
     res.status(500).json({ error: 'Não foi possível carregar os dados.' });
+  }
+});
+
+app.get('/api/unit-versions', async (req, res) => {
+  try {
+    const user = await getCurrentUser(req);
+    if (!user) {
+      return res.status(401).json({ error: 'Não autorizado.' });
+    }
+
+    res.json({
+      unitVersions: await getUnitVersions(),
+      sourceConfigured: Boolean(unitVersionsSourceUrl)
+    });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: 'Falha ao listar versões da unidade.' });
+  }
+});
+
+app.post('/api/unit-versions/sync', async (req, res) => {
+  try {
+    const user = await getCurrentUser(req);
+    if (!user || !['admin', 'editor'].includes(user.role)) {
+      return res.status(403).json({ error: 'Sem permissão.' });
+    }
+
+    const result = await syncUnitVersionsFromSource();
+    const unitVersions = await getUnitVersions();
+
+    res.json({
+      ...result,
+      unitVersions,
+      sourceConfigured: Boolean(unitVersionsSourceUrl)
+    });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: 'Falha ao sincronizar versões da unidade.' });
   }
 });
 
@@ -738,6 +986,7 @@ async function start() {
   try {
     await ensureSchema();
     await startRealtimeListener();
+    startUnitVersionSyncScheduler();
     app.listen(port, () => {
       console.log(`Servidor rodando em http://localhost:${port}`);
     });

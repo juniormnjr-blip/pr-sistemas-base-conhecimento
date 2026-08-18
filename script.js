@@ -5,7 +5,9 @@ const state = {
         modules: ['Geral'],
         categories: ['Erro']
     },
-    users: []
+    users: [],
+    unitVersions: [],
+    unitVersionsSourceConfigured: false
 };
 
 let isReturningToLogin = false;
@@ -39,6 +41,7 @@ function setupEventListeners() {
     document.getElementById('btn-logout-trigger').onclick = logout;
 
     document.getElementById('nav-view-btn').onclick = () => showTab('view');
+    document.getElementById('nav-unit-versions-btn').onclick = () => showTab('unit-versions');
 
     document.getElementById('nav-editor').onclick = () => {
         resetForm();
@@ -48,8 +51,10 @@ function setupEventListeners() {
     document.getElementById('nav-settings-btn').onclick = () => showTab('settings');
 
     document.getElementById('search-bar').oninput = renderCards;
+    document.getElementById('unit-version-search').oninput = renderUnitVersions;
     document.getElementById('filter-module').onchange = renderCards;
     document.getElementById('filter-category').onchange = renderCards;
+    document.getElementById('btn-sync-unit-versions').onclick = syncUnitVersionsNow;
 
     document.getElementById('btn-add-module').onclick = addModule;
     document.getElementById('btn-add-category').onclick = addCategory;
@@ -105,6 +110,8 @@ async function loadBootstrapData() {
     state.posts = data.posts || [];
     state.configs = data.configs || state.configs;
     state.users = state.currentUser?.role === 'admin' ? (data.users || []) : [];
+    state.unitVersions = data.unitVersions || [];
+    state.unitVersionsSourceConfigured = Boolean(data.unitVersionsSourceConfigured);
 
     return data;
 }
@@ -216,6 +223,11 @@ function initAppUI() {
     refreshDropdowns();
     renderAdminLists();
     renderCards();
+    renderUnitVersions();
+    document.getElementById('btn-sync-unit-versions').classList.toggle(
+        'hidden',
+        !['admin', 'editor'].includes(state.currentUser.role) || !state.unitVersionsSourceConfigured
+    );
     showTab('view');
 }
 
@@ -232,6 +244,7 @@ function showTab(tabId) {
 
     const navMap = {
         view: 'nav-view-btn',
+        'unit-versions': 'nav-unit-versions-btn',
         create: 'nav-editor',
         settings: 'nav-settings-btn'
     };
@@ -390,6 +403,7 @@ async function syncRealtimeState() {
         });
         renderAdminLists();
         renderCards();
+        renderUnitVersions();
 
         if (isEditing && editingId) {
             const post = state.posts.find(item => String(item.id) === String(editingId));
@@ -738,6 +752,121 @@ function renderAdminLists() {
             }
         </div>
     `).join('');
+}
+
+function renderUnitVersions() {
+    const grid = document.getElementById('unit-versions-grid');
+    const status = document.getElementById('unit-versions-status');
+    const syncButton = document.getElementById('btn-sync-unit-versions');
+    const search = document.getElementById('unit-version-search').value.toLowerCase().trim();
+    const unitVersions = Array.isArray(state.unitVersions) ? state.unitVersions : [];
+
+    if (status) {
+        status.innerHTML = state.unitVersionsSourceConfigured
+            ? '<span class="sync-badge live"><i class="ph ph-broadcast"></i> Sincronização automática ativa no servidor</span>'
+            : '<span class="sync-badge muted"><i class="ph ph-plug"></i> Configure UNIT_VERSIONS_SOURCE_URL para ativar a coleta automática</span>';
+    }
+
+    if (syncButton) {
+        const canSync = Boolean(state.currentUser && ['admin', 'editor'].includes(state.currentUser.role) && state.unitVersionsSourceConfigured);
+        syncButton.classList.toggle('hidden', !canSync);
+    }
+
+    if (!grid) return;
+
+    const filtered = unitVersions.filter(unit => {
+        const unitName = String(unit.unitName || '').toLowerCase();
+        const moduleMatches = Array.isArray(unit.moduleVersions) && unit.moduleVersions.some(item => {
+            const moduleName = String(item.moduleName || '').toLowerCase();
+            const version = String(item.version || '').toLowerCase();
+            return moduleName.includes(search) || version.includes(search);
+        });
+
+        return unitName.includes(search) || moduleMatches;
+    });
+
+    if (filtered.length === 0) {
+        grid.innerHTML = `
+            <div class="empty-state">
+                <i class="ph ph-magnifying-glass"></i>
+                <p>Nenhuma versão encontrada.</p>
+            </div>
+        `;
+        return;
+    }
+
+    grid.innerHTML = filtered.map(unit => {
+        const modules = Array.isArray(unit.moduleVersions) ? unit.moduleVersions : [];
+        const rows = modules.length > 0
+            ? modules.map(item => `
+                <div class="unit-version-row">
+                    <span class="unit-version-module">${escapeHTML(item.moduleName || 'Módulo')}</span>
+                    <strong class="unit-version-value">${escapeHTML(item.version || 'Sem versão')}</strong>
+                </div>
+            `).join('')
+            : `
+                <div class="unit-version-row muted-row">
+                    <span>Sem módulos informados</span>
+                    <strong>-</strong>
+                </div>
+            `;
+
+        return `
+            <article class="unit-version-card">
+                <div class="unit-version-header">
+                    <div>
+                        <span class="tag tag-module">Unidade</span>
+                        <h3>${escapeHTML(unit.unitName || '')}</h3>
+                    </div>
+                    <div class="unit-version-meta">
+                        <span><i class="ph ph-clock"></i> ${escapeHTML(formatDateTime(unit.syncedAt || unit.updatedAt || unit.createdAt))}</span>
+                        <span><i class="ph ph-database"></i> ${modules.length} módulo(s)</span>
+                    </div>
+                </div>
+                <div class="unit-version-list">
+                    ${rows}
+                </div>
+            </article>
+        `;
+    }).join('');
+}
+
+async function syncUnitVersionsNow() {
+    const button = document.getElementById('btn-sync-unit-versions');
+    if (button) {
+        button.disabled = true;
+        button.innerHTML = '<i class="ph ph-spinner-gap"></i> Sincronizando...';
+    }
+
+    try {
+        const response = await api('/api/unit-versions/sync', { method: 'POST' });
+        state.unitVersions = response.unitVersions || [];
+        state.unitVersionsSourceConfigured = Boolean(response.sourceConfigured);
+        renderUnitVersions();
+    } catch (error) {
+        alert(error.message || 'Não foi possível sincronizar as versões.');
+    } finally {
+        if (button) {
+            button.disabled = false;
+            button.innerHTML = '<i class="ph ph-arrows-clockwise"></i> Sincronizar agora';
+        }
+    }
+}
+
+function formatDateTime(value) {
+    if (!value) {
+        return 'Sem data';
+    }
+
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) {
+        return 'Data inválida';
+    }
+
+    return new Intl.DateTimeFormat('pt-BR', {
+        dateStyle: 'short',
+        timeStyle: 'short'
+    }).format(date);
 }
 
 function refreshDropdowns(previousValues = {}) {
