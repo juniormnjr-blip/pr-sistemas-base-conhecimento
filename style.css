@@ -391,6 +391,15 @@ textarea:focus {
     background: #f8fafc;
 }
 
+.unit-version-head-actions {
+    display: flex;
+    align-items: flex-start;
+    gap: 12px;
+    margin-left: auto;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+}
+
 .unit-version-section-label {
     font-size: 11px;
     text-transform: uppercase;
@@ -724,6 +733,30 @@ textarea:focus {
 
 .btn-primary.full-width {
     width: 100%;
+}
+
+.btn-danger {
+    border: 1px solid rgba(239, 68, 68, 0.24);
+    background: rgba(239, 68, 68, 0.08);
+    color: #b91c1c;
+    padding: 10px 14px;
+    border-radius: 10px;
+    font-weight: 700;
+    cursor: pointer;
+    transition: 0.2s ease;
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.btn-danger:hover {
+    background: rgba(239, 68, 68, 0.14);
+    border-color: rgba(239, 68, 68, 0.35);
+}
+
+.btn-unit-version-delete {
+    flex-shrink: 0;
+    margin-left: auto;
 }
 
 .btn-outline {

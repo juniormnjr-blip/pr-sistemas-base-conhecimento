@@ -809,6 +809,7 @@ function renderUnitVersions() {
     grid.innerHTML = filtered.map(unit => {
         const companies = Array.isArray(unit.companyNames) ? unit.companyNames.filter(Boolean) : [];
         const modules = Array.isArray(unit.moduleVersions) ? unit.moduleVersions : [];
+        const canManageUnitVersions = Boolean(state.currentUser && ['admin', 'editor'].includes(state.currentUser.role));
         const companyChips = companies.length > 0
             ? companies.map(companyName => `<span class="company-chip">${escapeHTML(companyName)}</span>`).join('')
             : '<span class="company-chip empty">Nenhuma empresa encontrada</span>';
@@ -839,10 +840,13 @@ function renderUnitVersions() {
                         <span class="tag tag-module">Empresa</span>
                         <h3>${escapeHTML(unit.unitName || '')}</h3>
                     </div>
-                    <div class="unit-version-meta">
-                        <span><i class="ph ph-clock"></i> ${escapeHTML(formatDateTime(unit.syncedAt || unit.updatedAt || unit.createdAt))}</span>
-                        <span><i class="ph ph-buildings"></i> ${companies.length} empresa(s)</span>
-                        <span><i class="ph ph-database"></i> ${modules.length} módulo(s)</span>
+                    <div class="unit-version-head-actions">
+                        <div class="unit-version-meta">
+                            <span><i class="ph ph-clock"></i> ${escapeHTML(formatDateTime(unit.syncedAt || unit.updatedAt || unit.createdAt))}</span>
+                            <span><i class="ph ph-buildings"></i> ${companies.length} empresa(s)</span>
+                            <span><i class="ph ph-database"></i> ${modules.length} módulo(s)</span>
+                        </div>
+                        ${canManageUnitVersions ? `<button type="button" class="btn-danger btn-unit-version-delete" onclick="deleteUnitVersion('${escapeAttr(unit.unitName || '')}', event)"><i class="ph ph-trash"></i> Excluir</button>` : ''}
                     </div>
                 </div>
                 <div class="unit-version-section">
@@ -857,6 +861,32 @@ function renderUnitVersions() {
             </article>
         `;
     }).join('');
+}
+
+async function deleteUnitVersion(unitName, event) {
+    if (event) {
+        event.stopPropagation();
+    }
+
+    const safeUnitName = String(unitName || '').trim();
+    if (!safeUnitName) {
+        return;
+    }
+
+    if (!confirm(`Excluir a unidade "${safeUnitName}" da lista de versões?`)) {
+        return;
+    }
+
+    try {
+        const response = await api(`/api/unit-versions/${encodeURIComponent(safeUnitName)}`, {
+            method: 'DELETE'
+        });
+
+        state.unitVersions = response.unitVersions || [];
+        renderUnitVersions();
+    } catch (error) {
+        alert(error.message || 'Não foi possível excluir a versão.');
+    }
 }
 
 async function syncUnitVersionsNow() {

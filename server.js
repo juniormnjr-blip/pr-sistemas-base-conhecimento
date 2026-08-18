@@ -719,6 +719,42 @@ app.post('/api/unit-versions/sync', async (req, res) => {
   }
 });
 
+app.delete('/api/unit-versions/:unitName', async (req, res) => {
+  try {
+    const user = await getCurrentUser(req);
+    if (!user || !['admin', 'editor'].includes(user.role)) {
+      return res.status(403).json({ error: 'Sem permissÃ£o.' });
+    }
+
+    const unitName = decodeURIComponent(String(req.params.unitName || '')).trim();
+    if (!unitName) {
+      return res.status(400).json({ error: 'Informe a unidade.' });
+    }
+
+    const result = await query(
+      `DELETE FROM unit_versions WHERE unit_name = $1 RETURNING unit_name`,
+      [unitName]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'VersÃ£o da unidade nÃ£o encontrada.' });
+    }
+
+    broadcastRealtimeChange({
+      type: 'unit-versions-updated',
+      records: [unitName]
+    });
+
+    res.json({
+      ok: true,
+      unitVersions: await getUnitVersions()
+    });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: 'Falha ao excluir versÃ£o da unidade.' });
+  }
+});
+
 app.get('/api/events', async (req, res) => {
   try {
     const user = await getCurrentUser(req);
